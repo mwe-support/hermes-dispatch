@@ -403,11 +403,6 @@ class _QQC2CFinalDeliveryBroker:
                         )
                     try:
                         outcome = await asyncio.shield(task)
-                    except asyncio.CancelledError:
-                        # The claim-owned task continues. A same-key waiter can
-                        # observe its result; if nobody remains, its completion
-                        # callback performs final cleanup and releases capacity.
-                        raise
                     except Exception:
                         if claim.attempt_task is task:
                             claim.attempt_task = None
@@ -767,7 +762,7 @@ def _remove_stream(adapter, state: _QQC2CStream) -> None:
     anchor_key = (state.chat_id, state.reply_to)
     if anchors.get(anchor_key) == state_key:
         anchors.pop(anchor_key, None)
-    _prune_native_lane_chats(adapter)
+    _native_lane_chats(adapter)
 
 
 def _evict_unopened_streams(adapter, *, limit: int) -> None:
@@ -814,10 +809,8 @@ def _native_lane_chats(adapter) -> Dict[str, None]:
 
 def _prune_native_lane_chats(
     adapter,
-    chats: Optional[Dict[str, None]] = None,
+    chats: Dict[str, None],
 ) -> None:
-    if chats is None:
-        chats = _native_lane_chats(adapter)
     streams, _anchors = _stream_maps(adapter)
     active_chats = {state.chat_id for state in streams.values()}
     while len(chats) > max(0, _MAX_NATIVE_LANE_CHATS):
@@ -845,7 +838,6 @@ def _unmark_native_lane(adapter, chat_id: str) -> None:
     if chat_id:
         chats = _native_lane_chats(adapter)
         chats.pop(str(chat_id), None)
-        _prune_native_lane_chats(adapter, chats)
 
 
 def _typing_budget_applies(adapter, chat_id: str) -> bool:
@@ -2296,21 +2288,6 @@ async def _complete_turn_final(
         )
         _remove_stream(adapter, state)
         return _send_result(success=True, message_id=completed_id)
-
-    if not state.stream_msg_id:
-        # No visible active stream and no unseen suffix is possible only for an
-        # empty final. Clear the placeholder and retain lifecycle evidence.
-        _remember_turn_tombstone(
-            adapter,
-            state,
-            final_payload=str(content or ""),
-            final_content=target,
-        )
-        _remove_stream(adapter, state)
-        return _send_result(
-            success=True,
-            message_id=state.last_completed_stream_id,
-        )
 
     sealed = await _seal_stream(adapter, state, state.last_content)
     if sealed.success:

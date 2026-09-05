@@ -711,3 +711,209 @@ When the buffered group history exceeds the message or character threshold, the
 plugin sends a compact extractive block: a count and small sample of earlier
 messages plus the latest messages that fit in the budget. It does not call an
 LLM for compression.
+
+## Ablation simplification (1.8.22)
+
+Four independently checked deletions remove a redundant cancellation rethrow,
+an unreachable duplicate final-completion branch, and two repeated lane-registry
+cleanup scans. No protocol behavior changes: claim-owned tasks remain shielded,
+completed delivery remains replayable, and active stream ownership still blocks
+LRU eviction. Unmark/remove each scan the lane registry once instead of twice.
+
+This remains a mounted plugin workaround for Hermes' missing native QQ C2C
+lifecycle. Enable/install and rollback as described above; to verify the
+simplification run `test_streaming.py`, `test_final_delivery.py`, and
+`test_steer.py` in an isolated Hermes environment. A negative ablation removing
+`asyncio.shield` fails the cancelled-holder delivery check and is **not** retained.
+See `docs/ablation-2026-09-05.md` for the baseline, individual results and live
+file-delivery acceptance. Existing profile data and credentials are unchanged.
+
+## Codex output attachments (1.8.22)
+
+Codex may deliver a local Markdown download link or a
+`:codex-file-citation{path="..." purpose="output"}` instead of a `MEDIA:`
+directive. Hermes' streamed-final dispatcher intentionally extracts explicit
+media directives only, leaving these output references visible but not uploaded.
+
+The QQ adapter's final `extract_media` boundary now converts these references to
+the existing Hermes attachment format. It uses Hermes path validation, resolves
+file names, removes the original target from the returned display text (avoiding
+non-streaming bare-path double uploads), and avoids adding directives for already-listed files.
+It reuses QQ's existing upload and `file_info` / `msg_type=7` sending code, per
+[QQ's official rich-media contract](https://bot.q.qq.com/wiki/develop/api-v2/server-inter/message/rich-media.html).
+No upload client, hosting service, dependency, or model prompt is added.
+
+Only explicit output citations and absolute/home-relative inline Markdown links
+(including angle-bracket paths with spaces and local file URIs) are newly
+recognized. Source citations, line references, examples in code/quotes, remote
+URLs, malformed links and unsafe/missing paths are not promoted. Ordinary paths
+and explicit media directives outside examples retain Hermes' delivery behavior. The new
+parser runs in QQ final delivery, including background/queued responses; it does
+not scan historical tool results or alter Codex runtime/streamed text. An already
+streamed citation can remain visible as text, followed by the real attachment.
+
+Install into an idle, selected canary Gateway:
+
+```bash
+scripts/install-plugins.sh "$HOME/.hermes/profiles/procurement" qqbot-connect-hotfix
+hermes -p procurement gateway restart
+```
+
+Verify with isolated `HERMES_HOME`, the Hermes Python environment and Hermes
+source on `PYTHONPATH`:
+
+```bash
+python plugins/qqbot-connect-hotfix/test_file_delivery.py
+python plugins/qqbot-connect-hotfix/test_streaming.py
+python plugins/qqbot-connect-hotfix/test_final_delivery.py
+python plugins/qqbot-connect-hotfix/test_steer.py
+```
+
+File tests drive real Gateway streamed/ordinary dispatch and QQ upload code,
+replacing only HTTP; private and group sends must upload matching bytes exactly
+once. For live acceptance, start a fresh QQ conversation and ask naturally to
+create a CSV. Omit delivery requests such as "send me", media directives, and
+upload APIs. Require
+a downloadable file card and compare downloaded bytes to the generated file.
+See `docs/ablation-2026-09-05.md` for recorded results and limits.
+
+The follow-up live comparison disabled automatic skill/memory learning and used
+identical natural-language TXT/CSV/JSON requests. Native Codex skills, native
+Codex UserPromptSubmit hooks, and this extraction bridge each delivered 3/3
+downloadable files. That small sample does not rank long-term reliability. The
+bridge remains the default here and adds no persistent prompt guidance. Hermes
+skill discovery and pre_llm_call context did not reach the Codex app-server in
+the diagnostic controls; merely registering them is not evidence of model
+exposure. The report records the actual loading boundary and restored state.
+
+The extended paired comparison used six report/PDF, presentation and code requests
+without delivery wording. Both native mechanisms triggered in 7/7 actual runs;
+each delivered 5/6 first attempts and covered 6/6 scenarios after one runtime
+silence interruption was retried. All 14 target/example attachments matched their
+QQ downloads. This did not establish a reliability winner or add persistent
+guidance. See the ablation report for exact prompts, separate interruption
+counts, artifact-validation limits, and restored environment.
+
+Version 1.8.23 also reports a failed post-stream media upload through Hermes'
+existing user-visible attachment-failure notice. Upstream ordinary delivery
+already checks `SendResult.success`, but its post-stream rescan ignores that
+return value. This QQ-only wrapper adds the missing notice after the existing
+caption retry finishes, without duplicating ordinary-path notices or retrying
+the upload itself. `test_file_delivery.py` includes a failing HTTP upload
+control and verifies one notice on failure and one attachment on success.
+
+Gateway-dependent patches install when the first QQ adapter is constructed,
+before it receives messages. Importing `gateway.run` during Hermes' background
+plugin discovery can deadlock with the main thread waiting for that discovery.
+`test_startup.py` checks that discovery does not import GatewayRunner and that
+the first adapter activates the patches. No special launcher or disabled
+background discovery is required.
+
+The optional Codex-native QQ delivery hook is documented in
+[`codex-app-server-phase-hotfix`](../codex-app-server-phase-hotfix/README.md#qq-file-delivery-hook-184).
+It is installed separately per profile/CODEX_HOME; this QQ plugin does not
+modify Codex hook configuration or hook trust. Remove that hook before rolling
+its companion Codex plugin back to a version without the hook script.
+
+The 2026-09-05 procurement acceptance with the native hook enabled covered
+six continuous private-chat turns and six continuous real-group turns. All
+12 emitted MEDIA and delivered the expected files: 16 downloads matched
+source bytes, with 16 file uploads and no observed duplicate file cards.
+Private streaming text still showed occasional MEDIA/citation fragments;
+this is not a text-rendering fix. The earlier hook-only/bridge-only controls
+and the scope of this single-model canary are recorded in
+[`docs/ablation-2026-09-05.md`](../../docs/ablation-2026-09-05.md).
+
+Rollback using the exact backup printed by the installer:
+
+```bash
+scripts/install-plugins.sh --restore "$HOME/.hermes/profiles/procurement" qqbot-connect-hotfix <backup-directory>
+hermes -p procurement gateway restart
+```
+
+Configuration, credentials, other plugins and generated files are preserved.
+Remove this bridge once upstream QQ extraction recognizes these output formats
+consistently in streamed and ordinary delivery.
+
+### Compatibility corrections (1.8.24)
+
+Version 1.8.24 supports the official Hermes 0.20.5 release
+[`v2026.8.19`, `fcbd1076a`](https://github.com/NousResearch/hermes-agent/tree/fcbd1076a93841fa88855acce810e342a5b78101)
+and 0.21.0 release
+[`v2026.8.31`, `29112bef`](https://github.com/NousResearch/hermes-agent/tree/29112bef099274229cadff79cdff7bf7b99c4b77).
+The path validator's signature is inspected: older Hermes receives only
+`path`, while newer Hermes also receives `session_key`. Validation is never
+skipped, and a TypeError inside the validator is not treated as an API fallback.
+The original 1.8.22/1.8.23 bridge regressed both explicit MEDIA and output
+references on official 0.20.5; use 1.8.24 for that release.
+
+Earlier live acceptance used development commit `1bbb6e5bc`, whose version
+field reported 0.20.5 but whose validator already supported `session_key`.
+That result is not proof of compatibility with the official 0.20.5 tag.
+
+QQ scans now use CommonMark block source maps from `markdown-it-py`, already
+included by Hermes' required Rich package, and its actual inline-code rule
+(including escaped openers and equal-length delimiters). Fences (including tildes, longer and unclosed fences), indented
+code, nested/lazy blockquotes and inline examples are protected during both
+MEDIA extraction and ordinary bare-path scanning. Top-level indented code is
+represented as an equivalent fenced block so image removal and Hermes' intervening `.strip()`
+cannot turn its contents into attachment candidates. Example content remains
+text; QQ's normal display formatting still applies. Upstream-recognized inline
+MEDIA forms, including a backtick-quoted path, remain supported. Duplicate
+detection uses the same protected extraction as delivery, so an example cannot
+suppress a real output of the same path. No new dependency installation or global Base adapter patch
+is introduced.
+
+Enable by installing this QQ plugin version and restarting the selected profile;
+the Codex hook script, registration and trust do not change. Run
+`test_file_delivery.py` against each official source checkout using the isolated
+environment described above. Its public Gateway/QQ tests cover existing MEDIA,
+new references, example-only and mixed replies, C2C/group, streamed/ordinary
+delivery, safe path validation and exactly-once success/failure behavior.
+Use the same backup-based rollback command above; reverting to 1.8.23 also
+restores the known compatibility defects.
+
+The final 1.8.24 review gate passed 13 isolated regression scripts against
+each official release above and development commit `1bbb6e5bc` (39 runs).
+Two independent review axes found no remaining P0/P1 after their initial
+counterexamples were fixed. The procurement-only live canary then downloaded
+one byte-matching CSV in each of a private chat and a real group; follow-up
+replies containing the actual files' links solely in code/quote examples sent
+no files. Replaying those same finals through the old bridge would extract
+one attachment each. See the ablation document for hashes, scope and limits.
+
+### Trailing-example correction (1.8.25)
+
+The 1.8.24 mixed-response test placed the real output after the example.
+The reverse order still lost a real output: generated MEDIA text appended at
+the end became a lazy continuation of a trailing blockquote or part of an
+unclosed fence. Adding a blank line cannot terminate an unclosed fence.
+
+Version 1.8.25 keeps validated output attachments as structured extraction
+results, separate from the reply text. It no longer appends generated MEDIA
+directives to the model's text. Native MEDIA handling, path safety, duplicate
+filtering and the existing QQ uploader remain in use, and the original example
+is retained for display. The same official 0.20.5/0.21.0 compatibility applies.
+
+Native MEDIA is captured from the original reply before display links are
+replaced. A safe plain basename may remain in the text; names containing
+spaces or Markdown syntax use the neutral label `attachment` there. The native
+QQ file card and downloaded file retain the exact filename. This prevents
+filenames such as `~~~report.txt` from changing the example boundaries during
+later ordinary-path scanning.
+
+Install 1.8.25 and restart only the selected profile; no hook registration or
+trust update is required. `test_file_delivery.py` covers both orderings with
+Markdown links and output citations, trailing/indented quotes, unclosed tilde
+and backtick fences, closed-fence controls, and streamed/ordinary C2C/group
+delivery. It requires one byte-matching real attachment and zero example
+uploads. Existing native MEDIA and audio markers are also checked. Rollback
+uses the same installer backup command above; 1.8.24 restores this known P2.
+
+The 1.8.25 submission gate passed the 39-run official/development source matrix
+and two independent reviews with no remaining P0/P1/P2 findings. A fixed-reply
+canary covered both trailing quotes and unclosed tilde fences in real procurement
+private/group chats: four real files were downloaded with matching bytes, zero
+example files uploaded. The exact four model replies each reproduce zero
+attachments through 1.8.24 and one through the fix. This is targeted delivery
+acceptance, not a claim about natural generation or unlimited input coverage.

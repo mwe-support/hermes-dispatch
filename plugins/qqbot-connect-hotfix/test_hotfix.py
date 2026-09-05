@@ -252,13 +252,19 @@ class DummySlashCommands:
 
 async def main():
     mod.register(None)
+    from gateway.config import PlatformConfig
     from gateway.platforms.qqbot.adapter import QQAdapter
+
+    # Gateway-dependent patches activate during the real adapter lifecycle,
+    # before its first message. __new__ alone skips that initialization.
+    adapter = QQAdapter(PlatformConfig(extra={
+        "app_id": "test-app", "client_secret": "test-secret",
+    }))
     from gateway.platforms.qqbot.keyboards import (
         ApprovalRequest,
         parse_approval_button_data,
     )
 
-    adapter = QQAdapter.__new__(QQAdapter)
     adapter._chat_type_map = {}
     assert adapter._guess_chat_type("B279C1A461933B21DAFEE3263B8854A6") == "group"
     assert parse_approval_button_data(

@@ -86,6 +86,109 @@ runtime never emit this elicitation and remain blocked.
 This behavior follows the current upstream [Codex app-server approval
 contract](https://github.com/openai/codex/blob/main/codex-rs/app-server/README.md#approvals).
 
+## QQ file-delivery hook (1.8.4)
+
+Codex can finish with local file links or output citations instead of the
+`MEDIA:` contract consumed by Hermes' streamed attachment delivery. This
+optional native `UserPromptSubmit` hook supplies that contract on every QQ
+DM/group turn, including vague report, presentation, and reusable-code requests.
+It does not rewrite the user's request, upload files, or choose an upload target.
+
+The three layers are:
+
+1. The Hermes runtime reads the Agent's trusted channel session key. It uses a
+   context variable to give only that QQ turn's Codex subprocess a profile/home
+   origin marker. Other channels, guild channels without native file upload,
+   and direct CLI clients receive empty markers. No process-global environment
+   is changed, and session-project mapping need not be enabled.
+2. `scripts/install-codex-qq-hook.py` registers the native hook in one explicitly
+   selected `CODEX_HOME/hooks.json`. The hook verifies both profile and Codex
+   home before emitting its short developer contract. It does not infer QQ from
+   the prompt or cwd. It writes only turn/session IDs and a contract hash to
+   `<profile>/logs/qq-delivery-hook.jsonl`, never prompt text or QQ identifiers.
+3. `qqbot-connect-hotfix` keeps the existing validated file-reference fallback
+   and native uploader. The hook requests final `MEDIA:` markers; the sender
+   owns actual delivery and reports a failed upload. Hook execution alone is
+   not delivery success.
+
+### Install for one profile (macOS/Linux)
+
+Use the profile's actual, already authenticated Codex home; do not derive it
+from a department name or copy another profile's configuration. Both paths are
+explicit installer arguments so an inherited desktop `CODEX_HOME` cannot select
+the wrong target. Run as the owner of the mounted/profile data.
+
+```bash
+QQ_HOOK_PROFILE="$HOME/.hermes/profiles/procurement"
+QQ_HOOK_CODEX_HOME="$HOME/.codex-hermes/procurement"
+QQ_HOOK_PYTHON="$HOME/.hermes/hermes-agent/venv/bin/python"
+scripts/install-plugins.sh "$QQ_HOOK_PROFILE" codex-app-server-phase-hotfix qqbot-connect-hotfix
+"$QQ_HOOK_PYTHON" scripts/install-codex-qq-hook.py \
+  --hermes-home "$QQ_HOOK_PROFILE" --codex-home "$QQ_HOOK_CODEX_HOME"
+CODEX_HOME="$QQ_HOOK_CODEX_HOME" codex
+# In Codex: /hooks, review and trust the QQ file-delivery hook, then exit.
+hermes -p procurement gateway restart
+```
+
+The hook runs before every model prompt in that Codex home, but emits context
+only for the marked QQ process. This scope is persistent until removal. Codex
+skips untrusted hooks: installing is not equivalent to activation. The installed
+script digest is part of the hook definition, so updating it requires normal
+native trust review again. Never add trust hashes or bypass trust in a deploy
+script. See [Codex Hooks](https://learn.chatgpt.com/docs/hooks#userpromptsubmit).
+
+The installer preserves unrelated hook definitions and does not touch
+`config.toml`, credentials, or MCP configuration. An ownership record prevents
+two profiles from claiming the same Codex home. Updates replace only our group
+in place; removal may leave an empty group to preserve subsequent hooks' trust
+indices. Symlinked shared hook/state files are rejected. Backups are stored
+outside plugin discovery in `<profile>/plugin-backups/codex-qq-hook-*`.
+
+### Verify and remove
+
+Run `test_qq_delivery_hook.py`, `scripts/test_install_codex_qq_hook.py`, and
+`qqbot-connect-hotfix/test_file_delivery.py` with the Hermes Python and an
+isolated `HERMES_HOME`. The checks cover QQ/group origin, other channels and
+same-cwd CLI exclusion, parallel contexts, two profile/home pairs, upgrade,
+unrelated trust/config preservation, rollback, and native file upload failures.
+
+For live acceptance, isolate automatic skill/memory learning and start fresh QQ
+turns. Ask naturally for a report, presentation or script, without sending or
+upload hints. Correlate native hook records with Codex turn IDs, inspect final
+`MEDIA:` and the QQ file card, then download and compare bytes. Use hook-only,
+bridge-only, combined and neither controls to separate their contributions.
+Also revise an output in the same conversation and check one new attachment.
+
+The 2026-09-05 procurement canary used Codex CLI 0.153.4 and
+`gpt-5.6-sol` / high. Hook-only, bridge-only, combined and negative controls
+behaved as expected; same-session revision, Python, four-slide PPTX, two-page
+PDF and ordinary-chat checks completed. A same-home/same-cwd direct CLI
+control emitted no QQ contract. A subsequent continuous-conversation check
+covered six natural file requests in a private chat and six in a real group:
+12/12 native hook executions, 12/12 final MEDIA responses and 16/16 downloaded
+files matching source bytes. Group history was retained, so this extension is
+live acceptance, not a clean-history causal comparison. Only procurement was
+deployed. Learning settings were restored and QQ reconnected at 20:06:12 +08:00.
+Private streaming text still sometimes exposes MEDIA fragments or literal
+output citations; attachment delivery and text rendering are separate results.
+See [the acceptance record](../../docs/ablation-2026-09-05.md#常驻-qq-hook-实现与私聊群聊验收2026-09-05-完成)
+for conditions and limits; these small samples do not establish long-term rates.
+
+Remove the hook before restoring an older Hermes plugin that lacks its script:
+
+```bash
+"$QQ_HOOK_PYTHON" scripts/install-codex-qq-hook.py \
+  --hermes-home "$QQ_HOOK_PROFILE" --codex-home "$QQ_HOOK_CODEX_HOME" --remove
+# Restore the required plugin backups with scripts/install-plugins.sh --restore.
+hermes -p procurement gateway restart
+```
+
+Removal is surgical and preserves unrelated hooks added since installation.
+Existing native trust records are left to Codex; without the hook definition
+they execute nothing. Removing only this optional hook leaves normal QQ
+file-reference delivery available. This feature does not change turn or
+inactivity timeouts.
+
 ## Long-turn deadline
 
 Version 1.5.0 makes the app-server turn deadline configurable. The default is

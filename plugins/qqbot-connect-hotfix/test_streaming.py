@@ -399,6 +399,26 @@ async def main():
     assert silent_bodies[-1]["content_raw"] == " resumed"
     assert "stream_msg_id" not in silent_bodies[-1]
 
+    # A deadline rollover may leave the final fully owned by a sealed head,
+    # including an empty final callback. Completing it must not open a carrier.
+    for final_text in ("committed head", ""):
+        committed_final = DummyAdapter()
+        committed_metadata = {"reply_to_message_id": "inbound-committed-final"}
+        await committed_final.send_draft(
+            "user-committed-final", 1004, "committed head", committed_metadata,
+        )
+        committed_final.native_stream_now = 481.0
+        result = await committed_final.send(
+            "user-committed-final", final_text,
+            metadata={"notify": True, **committed_metadata},
+        )
+        assert result.success and result.message_id == "stream-1"
+        assert [call[2]["input_state"] for call in committed_final.api_calls] == [1, 10]
+        assert not committed_final.normal_sends
+        assert not streaming_mod._stream_maps(committed_final)[0]
+        assert_exact_final_ownership(committed_final, "committed head")
+    print("qq_c2c_committed_final_without_active_carrier=ok")
+
     # Completing a turn before its deadline must cancel the independent timer;
     # releasing the old sleeper afterwards cannot emit a late seal.
     cancelled_expiry = DummyAdapter()
