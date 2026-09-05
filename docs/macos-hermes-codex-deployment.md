@@ -277,6 +277,14 @@ hermes -p default approvals suggest --apply 1,2
 `suggest` 是 `hermes approvals` 的子命令，不是 `approvals.mode` 的取值；破坏性命令
 不会被加入建议列表。
 
+**核对实际 Codex 模型：** 本机验证的官方 Hermes 0.20.5 `codex_app_server` 路径没有把
+Hermes 的模型名和 `agent.reasoning_effort` 传入原生会话/轮次请求；实际运行采用目标
+`CODEX_HOME` 中的 Codex 配置，不能以 QQ `/new` 或 Hermes 状态中显示的模型作为生效证明。
+如需指定原生模型与推理强度，使用该 Codex home 的 `config.toml` 中正式的 `model` 和
+`model_reasoning_effort` 设置，并核对实际轮次的 `turn_context`。默认 profile 复用
+`~/.codex`，修改这些设置也会影响共用它的 CLI/App；已有环境先记录实际值，不要为匹配
+Hermes 的显示名称而静默改写共享配置。命名 profile 的隔离方式见第 9 节。
+
 ## 6. 配置 `.env`
 
 新装默认 profile 时，明确打开它的环境文件：
