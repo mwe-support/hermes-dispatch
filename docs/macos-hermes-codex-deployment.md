@@ -436,11 +436,17 @@ hermes -p default tools list --platform qqbot
 - QQ 单次 final、群被动消息上下文、引用媒体和审批按钮兼容；
 - QQ SQLite 长期快照、精确过滤、FTS5/BM25、模糊召回和恢复。
 
+QQ 输出文件桥接随 `qqbot-connect-hotfix` 启用，无需新增 `config.yaml` 或 `.env` 开关。
+它将最终回复中的有效本地下载链接和 output citation 交给现有 QQ 上传器；不会要求每轮
+模型都输出 MEDIA。若需要对报告、演示稿或脚本请求加入常驻交付提示，另按第 9.1 节
+选择性安装 Codex 原生 hook；复制或启用上述插件不会自动注册、信任该 hook。
+
 ## 8. 运行插件回归测试
 
 ```bash
 cd "$HOME/src/hermes-dispatch"
 (
+set -e
 HERMES_PY="$HOME/.hermes/hermes-agent/venv/bin/python"
 TEST_HERMES_HOME="$(mktemp -d /private/tmp/hermes-plugin-tests.XXXXXX)"
 export HERMES_HOME="$TEST_HERMES_HOME"
@@ -448,7 +454,10 @@ export PYTHONPATH="$HOME/.hermes/hermes-agent"
 export PYTHONDONTWRITEBYTECODE=1
 
 "$HERMES_PY" plugins/codex-app-server-phase-hotfix/test_hotfix.py
+"$HERMES_PY" plugins/codex-app-server-phase-hotfix/test_qq_delivery_hook.py
 "$HERMES_PY" plugins/qqbot-connect-hotfix/test_hotfix.py
+"$HERMES_PY" plugins/qqbot-connect-hotfix/test_file_delivery.py
+"$HERMES_PY" plugins/qqbot-connect-hotfix/test_startup.py
 "$HERMES_PY" plugins/qqbot-connect-hotfix/test_expired_reply.py
 "$HERMES_PY" plugins/qqbot-connect-hotfix/test_media_reply.py
 "$HERMES_PY" plugins/qqbot-connect-hotfix/test_group_roundtrip.py
@@ -460,6 +469,7 @@ export PYTHONDONTWRITEBYTECODE=1
 "$HERMES_PY" plugins/message-snapshot-store/test_materialize.py
 "$HERMES_PY" plugins/message-snapshot-store/test_quoted_attachment.py
 "$HERMES_PY" plugins/message-snapshot-store/test_whatsapp_capture.py
+"$HERMES_PY" scripts/test_install_codex_qq_hook.py
 scripts/test_install_plugins.sh
 git diff --check
 )
@@ -553,6 +563,51 @@ CODEX_HOME="$HOME/.codex-hermes/sales" codex mcp list
 `CODEX_HOME` 各建一个 Codex 会话，调用一个无写入副作用、能区分权限范围的真实工具；必须
 只返回该 profile 用户可访问的数据。任何跨 profile 结果都视为隔离失败。
 
+### 9.1 可选：为 QQ 安装原生文件交付 hook
+
+`codex-app-server-phase-hotfix` 1.8.4 提供原生 `UserPromptSubmit` hook，对 QQ 私聊/群聊
+的产物请求补充交付契约。普通文件桥接不依赖它；hook 触发也不等于 QQ 上传成功。
+先完成第 7 节插件安装和本节认证，以目标 macOS 部门账号执行，勿用 `sudo`。
+
+显式选择一对与目标 Gateway 实际配置一致的路径。默认 profile 示例：
+
+```bash
+QQ_HOOK_PROFILE_NAME=default
+QQ_HOOK_PROFILE="$HOME/.hermes"
+QQ_HOOK_CODEX_HOME="$HOME/.codex"
+QQ_HOOK_PYTHON="$HOME/.hermes/hermes-agent/venv/bin/python"
+```
+
+若目标是命名 profile，例如 sales，将前三项替换为以下值；Codex home 必须与该
+profile 的 `.env` 一致，不能把所有 profile 的 hook 都装进默认 `~/.codex`：
+
+```bash
+QQ_HOOK_PROFILE_NAME=sales
+QQ_HOOK_PROFILE="$HOME/.hermes/profiles/sales"
+QQ_HOOK_CODEX_HOME="$HOME/.codex-hermes/sales"
+```
+
+确认该 Codex home 的 `login status` 显示已登录后，安装并审查：
+
+```bash
+CODEX_HOME="$QQ_HOOK_CODEX_HOME" codex login status
+cd "$HOME/src/hermes-dispatch"
+"$QQ_HOOK_PYTHON" scripts/install-codex-qq-hook.py \
+  --hermes-home "$QQ_HOOK_PROFILE" --codex-home "$QQ_HOOK_CODEX_HOME"
+CODEX_HOME="$QQ_HOOK_CODEX_HOME" codex
+# 在 Codex 中执行 /hooks，审查并信任 QQ file delivery hook，然后退出。
+```
+
+未信任的 hook 会被 Codex 跳过。安装器保留其他 hooks、配置和凭据，并拒绝让两个
+Hermes profile 占用同一个 Codex home 的托管 hook。来源标记
+`HERMES_DISPATCH_QQ_PROFILE`、`HERMES_DISPATCH_QQ_CODEX_HOME` 由运行时按子进程设置，
+不得手工写入 `.env` 或全局 shell 配置。直接 CLI 和其他渠道不应收到 QQ 交付契约。
+
+新装环境继续第 10 节；已运行的目标 Gateway 在空闲窗口执行
+`env -u CODEX_HOME hermes -p "$QQ_HOOK_PROFILE_NAME" gateway restart`，随后按第 12 节验收。
+原生机制见 [Codex Hooks](https://learn.chatgpt.com/docs/hooks#userpromptsubmit)，
+契约与隔离边界见 [插件 README](../plugins/codex-app-server-phase-hotfix/README.md#qq-file-delivery-hook-184)。
+
 ## 10. 启动 Gateway
 
 安装并启动用户级服务：
@@ -613,6 +668,8 @@ CODEX_HOME=/Users/<当前macOS账号>/.codex-hermes/finance
 ```
 
 按第 9 节创建两个 `CODEX_HOME`、设置权限/凭据方式，并分别完成 MCP 迁移与真实隔离测试。
+需要 QQ 原生交付 hook 的小组，还须在插件安装后逐一执行第 9.1 节；克隆 Hermes profile
+不等于已在新 Codex home 中注册并信任 hook。
 Gateway 会在启动时从该 profile 的 `.env` 加载 `CODEX_HOME`；不要手改 LaunchAgent plist，
 因为下一次 `gateway install --force` 会重新生成它。
 
@@ -694,6 +751,8 @@ env -u CODEX_HOME hermes -p default gateway status
 - `approvals.mode=smart`、三个 timeout、streaming 和 session-project 环境键符合预期；
 - `.env` 中每个受管键只有一条有效赋值，QQ 凭据内容不打印到报告；
 - 命名 profile 的 `CODEX_HOME` 不同，`codex mcp list` 与真实只读 MCP 调用都通过隔离测试。
+- 若启用 QQ 原生 hook，目标 Codex home 的 `/hooks` 显示当前定义已信任；不以插件列表
+  的 enabled 状态代替 hook 激活证明。
 
 默认 profile 使用 `env -u CODEX_HOME hermes -p default ...`；命名 profile 使用
 `hermes -p <name> ...`，并以其 `.env` 中的 `CODEX_HOME` 执行 `codex mcp ...`。
@@ -720,6 +779,12 @@ env -u CODEX_HOME hermes -p default gateway status
    `registered`；Codex App 侧边栏出现该项目。Gateway 重启后恢复同一 thread，`/new`
    后项目不变并创建以新 `session_id` 命名的 thread。
 5. 如启用审批、媒体或项目别名，再分别验证发起人审批、引用附件和管理员权限边界。
+6. 文件桥接：在实际启用的私聊/群聊分别请求生成并修改一个小文件，确认每轮只出现一个
+   目标文件卡片，下载后与当轮源文件字节一致。再检查真实链接前后带代码/引用示例、
+   尾随未闭合围栏时只发送目标文件；仅含示例的回复不得上传文件。
+7. 若启用原生 hook，关联 `<profile>/logs/qq-delivery-hook.jsonl` 的 `turn_id` 与对应
+   Codex 轮次，分别检查契约触发和实际附件交付。使用同一 Codex home、同一 cwd 的直接
+   CLI 做对照，应无 QQ 契约和该轮审计记录；普通聊天可以触发 hook，但不应因此生成附件。
 
 ### D. 完整运行验收（按发布风险执行）
 
@@ -802,6 +867,11 @@ scripts/install-plugins.sh "$HOME/.hermes/profiles/sales" \
   message-snapshot-store
 ```
 
+若目标已启用 QQ 原生 hook，更新 Codex hotfix 后按第 9.1 节重新运行 hook 安装器。
+其定义包含已安装脚本的 SHA-256；脚本字节改变后必须在目标 Codex home 的 `/hooks`
+重新审查并信任，不能复制信任哈希或绕过审查。仅更新 QQ hotfix 且 hook 脚本未变时，
+不需要重新注册或信任。未选择该可选 hook 的 profile 不必新增配置。
+
 安装器输出的每个外部备份路径都要记录。再次运行第 8 节测试和目标 profile 的
 `config check`；仍全部通过后，只重启目标 Gateway：
 
@@ -820,6 +890,20 @@ awk '$1 == "version:" {print FILENAME, $2}' \
 ```
 
 ### 13.3 回滚
+
+只移除可选 QQ 原生交付 hook 时，先按第 9.1 节重新确认目标变量，再执行：
+
+```bash
+cd "$HOME/src/hermes-dispatch"
+"$QQ_HOOK_PYTHON" scripts/install-codex-qq-hook.py \
+  --hermes-home "$QQ_HOOK_PROFILE" --codex-home "$QQ_HOOK_CODEX_HOME" --remove
+env -u CODEX_HOME hermes -p "$QQ_HOOK_PROFILE_NAME" gateway restart
+```
+
+移除操作保留其他 hooks 和 Codex 配置，普通 QQ 文件桥接仍可使用。回退到不含 hook
+脚本的旧 Codex 插件之前，必须先移除该定义；若旧版本仍含脚本且需要保留 hook，则在
+恢复插件后重新运行安装器并审查信任。备份位于目标 profile 的
+`plugin-backups/codex-qq-hook-*`，不要用整份旧 `hooks.json` 覆盖后来新增的其他 hooks。
 
 只回滚 Codex 长任务机制：
 
