@@ -201,7 +201,23 @@ hermes -p default config set display.platforms.qqbot.streaming true
 hermes -p default config set display.platforms.qqbot.tool_progress new
 
 hermes -p default config set group_sessions_per_user false
-hermes -p default config set session_reset.mode none
+# 旧版 CLI 会把标量 none 当作空值；保留原 reset 设置后以结构化值写入。
+"$HOME/.hermes/hermes-agent/venv/bin/python" - <<'PY'
+import json
+import subprocess
+from pathlib import Path
+import yaml
+
+config_path = Path.home() / ".hermes/config.yaml"
+config = yaml.safe_load(config_path.read_text()) or {}
+reset = dict(config.get("session_reset") or {})
+reset["mode"] = "none"
+subprocess.run(
+    ["hermes", "-p", "default", "config", "set", "--force", "session_reset", json.dumps(reset)],
+    check=True,
+)
+assert yaml.safe_load(config_path.read_text())["session_reset"] == reset
+PY
 hermes -p default config set approvals.mode smart
 hermes -p default config set approvals.mcp_reload_confirm false
 hermes -p default config set agent.gateway_timeout 7200
