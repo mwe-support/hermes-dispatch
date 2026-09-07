@@ -653,6 +653,24 @@ Hermes profile 占用同一个 Codex home 的托管 hook。来源标记
 原生机制见 [Codex Hooks](https://learn.chatgpt.com/docs/hooks#userpromptsubmit)，
 契约与隔离边界见 [插件 README](../plugins/codex-app-server-phase-hotfix/README.md#qq-file-delivery-hook-184)。
 
+### 9.2 已知限制：Hermes MCP 插件加载
+
+2026-09-07 在 `codex-app-server-phase-hotfix` 1.8.5 上仍可复现：独立
+`hermes-tools` MCP 子进程加载插件时，`model_tools` 与 `run_agent` 循环导入，报
+`cannot import name 'get_tool_definitions' from partially initialized module 'model_tools'`。
+MCP 握手、工具列表和已验证的 `skills_list` 调用仍可成功；这不代表该插件在 MCP
+进程中加载完整，也不代表所有 Hermes 工具已提供给 Codex。
+
+此限制与 Gateway 的命令处理分开记录。已实测的 QQ `/help`、`/model`、`/reasoning`、
+`/stop`、文件交付和会话恢复正常；WhatsApp 命令链通过隔离测试，未据此宣称真实客户端
+验收通过。若当前用途只依赖已验证的核心功能，可以暂缓处理循环导入，继续使用并保留
+告警和限制记录，不标记为“已解决”。
+
+若需要模型通过 MCP 调用 `codex_session_project` 等项目工具，必须先修复并重新验收。
+工具还受 Tool Search 折叠和 MCP 固定导出名单限制，不能认为只修循环导入就能恢复；
+还需验证当前会话身份、权限及跨会话隔离。不要为消除告警而禁用整个兼容插件，也不要
+把某个 QQ/WhatsApp 会话标识写成全局环境常量。正常功能出现回归时，按第 13 节回滚。
+
 ## 10. 启动 Gateway
 
 安装并启动用户级服务：
@@ -801,6 +819,10 @@ env -u CODEX_HOME hermes -p default gateway status
 
 默认 profile 使用 `env -u CODEX_HOME hermes -p default ...`；命名 profile 使用
 `hermes -p <name> ...`，并以其 `.env` 中的 `CODEX_HOME` 执行 `codex mcp ...`。
+
+MCP 按实际需要的工具逐项验收。若按第 9.2 节暂缓项目 MCP 能力，报告应分别写明
+“基础调用通过”和“项目 MCP 已知限制，暂缓处理”，不能写成完整 MCP 验收通过。
+如果当前任务依赖这些缺失工具，该项仍判失败，不能用其他工具的成功代替。
 
 ### B. Gateway 与渠道就绪
 

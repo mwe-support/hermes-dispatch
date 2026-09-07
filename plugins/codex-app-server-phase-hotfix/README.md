@@ -140,6 +140,13 @@ same Gateway. Hermes' persisted command settings remain; older plugin versions
 again leave native Codex requests without these overrides. Remove this patch
 when the upstream runtime forwards the resolved Agent settings itself.
 
+The separate `hermes-tools` MCP startup import cycle remains a known limitation
+in 1.8.5. Verified Gateway commands and file delivery can work while this plugin
+fails to load in the MCP subprocess. It may be deferred when affected MCP tools
+are not required; this is not a claim of full MCP availability or a resolved
+import cycle. See the [macOS guide](../../docs/macos-hermes-codex-deployment.md)
+for the affected scope, acceptance criteria, and conditions for revisiting it.
+
 ## QQ file-delivery hook (1.8.4)
 
 Codex can finish with local file links or output citations instead of the
