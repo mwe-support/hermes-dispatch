@@ -1,5 +1,5 @@
 name: codex-app-server-phase-hotfix
-version: 1.8.4
-description: "Fix Codex final routing, lifecycle cleanup, long-turn deadlines, image delivery, approvals, persistent Hermes-session project/thread/App mapping, and profile-scoped native QQ file-delivery hooks."
+version: 1.8.5
+description: "Fix Codex final routing, lifecycle cleanup, long-turn deadlines, image delivery, approvals, persistent Hermes-session project/thread/App mapping, Hermes slash-command model/reasoning controls, and profile-scoped native QQ file-delivery hooks."
 author: local
 kind: standalone

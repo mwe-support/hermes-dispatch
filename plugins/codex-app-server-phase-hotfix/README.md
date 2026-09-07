@@ -1,6 +1,6 @@
 # Codex App-Server Compatibility Hotfix
 
-Persistent Hermes plugin for seven Hermes Codex app-server integration
+Persistent Hermes plugin for eight Hermes Codex app-server integration
 gaps:
 
 1. A completed Codex `final_answer` is also emitted through the gateway
@@ -27,6 +27,8 @@ gaps:
    session is scattered across unrelated Codex projects and conversations.
 7. Starting an app-server thread with a project `cwd` does not register that
    directory in Codex Desktop's sidebar project list.
+8. Hermes 0.20.5/0.21.0 resolves `/model` and `/reasoning` settings, but its
+   app-server requests omit them, leaving Codex to use its own defaults.
 
 The plugin forwards explicit `commentary`, suppresses explicit `final_answer`,
 and defers unknown-phase messages until later turn activity proves they are
@@ -85,6 +87,65 @@ runtime never emit this elicitation and remain blocked.
 
 This behavior follows the current upstream [Codex app-server approval
 contract](https://github.com/openai/codex/blob/main/codex-rs/app-server/README.md#approvals).
+
+## Channel model controls (1.8.5)
+
+QQ and WhatsApp keep Hermes' existing slash-command interface. This plugin
+does not parse chat commands, replace their handlers, or change their access
+checks. After Hermes resolves the effective Agent settings, a context variable
+carries `agent.model` and `agent.reasoning_config` to that turn's Codex client.
+New and resumed threads receive the model; every `turn/start` receives model
+and effort, so cached threads and `--once` restoration cannot retain stale
+Codex overrides. Explicit fields supplied by a newer upstream take precedence.
+See the official [Codex turn contract](https://learn.chatgpt.com/docs/app-server#start-a-turn).
+
+Use the normal commands in QQ or WhatsApp:
+
+```text
+/help
+/model
+/model gpt-5.6-sol --provider openai-codex --session
+/model gpt-5.6-luna --once
+/reasoning high
+/reasoning reset
+/stop
+```
+
+`/model ... --global` and `/reasoning ... --global` retain Hermes' explicit
+config persistence behavior. Session scope follows Hermes' routing settings,
+including shared-group sessions. `/reasoning off` only hides reasoning display;
+`/reasoning none` requests disabled reasoning. When Hermes has no effort
+override, this adapter sends its default `medium`, also clearing a previous
+thread override. Model/effort support is still validated by Codex; backend
+rejections remain visible rather than silently using another model.
+
+No shared `CODEX_HOME/config.toml`, credential, hook definition, or environment
+setting is changed. Other runtimes retain their upstream behavior. Direct Codex
+clients outside a Hermes turn receive no injected options, and control requests
+such as `turn/interrupt` and `turn/steer` are untouched.
+
+Install 1.8.5 into the selected profile with `scripts/install-plugins.sh`, then
+restart that profile's idle Gateway. The native QQ delivery hook script is
+unchanged, so no hook re-registration or trust update is needed for this change.
+Run `test_model_controls.py` with Hermes on `PYTHONPATH`; it uses isolated homes,
+real QQ/WhatsApp command handlers and real Codex RPC assembly, substituting
+provider discovery and the wire transport. It covers session/global/once/reset,
+cache/resume, concurrent conversations, help and active-turn stop. Existing
+regressions remain required. For live verification, compare `/model` and
+`/reasoning` selections with the next Codex `turn_context`, then verify a
+one-turn switch returns to the prior settings without creating another thread.
+
+Rollback with the exact plugin backup printed by the installer and restart the
+same Gateway. Hermes' persisted command settings remain; older plugin versions
+again leave native Codex requests without these overrides. Remove this patch
+when the upstream runtime forwards the resolved Agent settings itself.
+
+The separate `hermes-tools` MCP startup import cycle remains a known limitation
+in 1.8.5. Verified Gateway commands and file delivery can work while this plugin
+fails to load in the MCP subprocess. It may be deferred when affected MCP tools
+are not required; this is not a claim of full MCP availability or a resolved
+import cycle. See the [macOS guide](../../docs/macos-hermes-codex-deployment.md)
+for the affected scope, acceptance criteria, and conditions for revisiting it.
 
 ## QQ file-delivery hook (1.8.4)
 
