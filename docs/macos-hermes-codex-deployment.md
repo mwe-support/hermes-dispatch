@@ -277,13 +277,33 @@ hermes -p default approvals suggest --apply 1,2
 `suggest` 是 `hermes approvals` 的子命令，不是 `approvals.mode` 的取值；破坏性命令
 不会被加入建议列表。
 
-**核对实际 Codex 模型：** 本机验证的官方 Hermes 0.20.5 `codex_app_server` 路径没有把
-Hermes 的模型名和 `agent.reasoning_effort` 传入原生会话/轮次请求；实际运行采用目标
-`CODEX_HOME` 中的 Codex 配置，不能以 QQ `/new` 或 Hermes 状态中显示的模型作为生效证明。
-如需指定原生模型与推理强度，使用该 Codex home 的 `config.toml` 中正式的 `model` 和
-`model_reasoning_effort` 设置，并核对实际轮次的 `turn_context`。默认 profile 复用
-`~/.codex`，修改这些设置也会影响共用它的 CLI/App；已有环境先记录实际值，不要为匹配
-Hermes 的显示名称而静默改写共享配置。命名 profile 的隔离方式见第 9 节。
+**QQ/WhatsApp 的模型入口仍是 Hermes slash 命令。** 使用
+`codex-app-server-phase-hotfix` **1.8.5 或更高版本**，将 Hermes 已解析的模型和推理强度
+传给原生 Codex。官方 Hermes 0.20.5/0.21.0 的原始调用遗漏这些参数；只在 Hermes 中
+看到切换成功不足以证明生效，验收还须核对下一轮 Codex `turn_context`。
+
+以下内容直接发送到对应 QQ/WhatsApp 会话，不在终端执行：
+
+```text
+/help
+/model
+/model gpt-5.6-sol --provider openai-codex --session
+/model gpt-5.6-luna --once
+/reasoning high
+/reasoning reset
+/stop
+```
+
+`/model` 查看选项；`--session` 作用于当前 Hermes 会话，`--once` 只覆盖下一轮。
+需持久化全局设置时显式使用 `/model ... --global` 或 `/reasoning ... --global`。
+会话范围和权限沿用 Hermes，包括共享群会话设置。`/reasoning off` 只隐藏推理显示，
+`/reasoning none` 才请求关闭推理；未设置 effort 时按 Hermes 默认值 `medium` 传递。
+模型及 effort 是否受支持仍由 Codex 校验。`/help`、`/stop` 和其他 Hermes 命令保持
+原处理路径，不作为普通模型提示词发送。
+
+不需要为了该功能改写共享 `~/.codex/config.toml` 的模型设置；CLI/App 的原默认值保留。
+更新目标插件并重启该 profile 即可，QQ 原生文件交付 hook 的脚本/信任无需改变。
+细节与回滚见 [插件说明](../plugins/codex-app-server-phase-hotfix/README.md#channel-model-controls-185)。
 
 ## 6. 配置 `.env`
 
@@ -478,6 +498,7 @@ export PYTHONPATH="$HOME/.hermes/hermes-agent"
 export PYTHONDONTWRITEBYTECODE=1
 
 "$HERMES_PY" plugins/codex-app-server-phase-hotfix/test_hotfix.py
+"$HERMES_PY" plugins/codex-app-server-phase-hotfix/test_model_controls.py
 "$HERMES_PY" plugins/codex-app-server-phase-hotfix/test_qq_delivery_hook.py
 "$HERMES_PY" plugins/qqbot-connect-hotfix/test_hotfix.py
 "$HERMES_PY" plugins/qqbot-connect-hotfix/test_file_delivery.py
@@ -809,6 +830,10 @@ env -u CODEX_HOME hermes -p default gateway status
 7. 若启用原生 hook，关联 `<profile>/logs/qq-delivery-hook.jsonl` 的 `turn_id` 与对应
    Codex 轮次，分别检查契约触发和实际附件交付。使用同一 Codex home、同一 cwd 的直接
    CLI 做对照，应无 QQ 契约和该轮审计记录；普通聊天可以触发 hook，但不应因此生成附件。
+8. 模型控制：分别通过 QQ/WhatsApp 的 `/model ... --session`、`--once` 和 `/reasoning`
+   设置模型/强度，检查实际下一轮 `turn_context`，并验证单轮覆盖结束、reasoning reset、
+   Gateway 重启恢复后仍采用 Hermes 的有效设置。检查另一个会话没有被会话级设置影响；
+   `/help` 可用，`/stop` 能停止发起者的任务。未启用的渠道记为未执行，不为验收启动它。
 
 ### D. 完整运行验收（按发布风险执行）
 
