@@ -1,0 +1,49 @@
+{
+  "schema": 1,
+  "minimum_hermes": "0.20.5",
+  "plugins": [
+    "codex-app-server-phase-hotfix",
+    "qqbot-connect-hotfix",
+    "message-snapshot-store"
+  ],
+  "enable_plugins": [
+    "openai-codex",
+    "codex-app-server-phase-hotfix",
+    "qqbot-connect-hotfix",
+    "message-snapshot-store"
+  ],
+  "enable_tools": [
+    "message_snapshot",
+    "codex_session_project"
+  ],
+  "config_set": {
+    "model.openai_runtime": "codex_app_server",
+    "compression.codex_app_server_auto": "native"
+  },
+  "env_set_if_missing": {
+    "HERMES_CODEX_APP_SERVER_TURN_TIMEOUT_SECONDS": "0",
+    "HERMES_CODEX_SESSION_PROJECTS_ENABLED": "true",
+    "HERMES_CODEX_SESSION_PROJECTS_BACKFILL": "true"
+  },
+  "tests": [
+    "plugins/codex-app-server-phase-hotfix/test_hotfix.py",
+    "plugins/codex-app-server-phase-hotfix/test_model_controls.py",
+    "plugins/codex-app-server-phase-hotfix/test_qq_delivery_hook.py",
+    "plugins/qqbot-connect-hotfix/test_hotfix.py",
+    "plugins/qqbot-connect-hotfix/test_file_delivery.py",
+    "plugins/qqbot-connect-hotfix/test_startup.py",
+    "plugins/qqbot-connect-hotfix/test_expired_reply.py",
+    "plugins/qqbot-connect-hotfix/test_media_reply.py",
+    "plugins/qqbot-connect-hotfix/test_group_roundtrip.py",
+    "plugins/qqbot-connect-hotfix/test_final_delivery.py",
+    "plugins/qqbot-connect-hotfix/test_streaming.py",
+    "plugins/qqbot-connect-hotfix/test_steer.py",
+    "plugins/message-snapshot-store/test_store.py",
+    "plugins/message-snapshot-store/test_capture.py",
+    "plugins/message-snapshot-store/test_materialize.py",
+    "plugins/message-snapshot-store/test_quoted_attachment.py",
+    "plugins/message-snapshot-store/test_whatsapp_capture.py",
+    "scripts/test_install_codex_qq_hook.py",
+    "ops/test_hermes_dispatch_update.py"
+  ]
+}

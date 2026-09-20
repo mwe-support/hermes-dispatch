@@ -62,6 +62,124 @@ Exercise both installation and rollback safety without touching a real profile:
 scripts/test_install_plugins.sh
 ```
 
+## Automatic Updates on macOS and Windows
+
+`ops/hermes_dispatch_update.py` is a host-side updater, not a Gateway plugin.
+That separation is intentional: it can repair or roll back dispatch plugins
+when the Gateway is stopped or broken, and it never replaces code from inside
+the process currently importing that code.
+
+The updater tracks reviewed `origin/main`, validates `ops/release.json`, runs
+the declared regressions with a temporary `HERMES_HOME`, and changes only the
+profile named on the command line. The default mode is read-only:
+
+```bash
+python3 ops/hermes_dispatch_update.py run --profile default
+```
+
+The result is `dry-run-passed`, `already-tested`, `blocked`, or a failure. A
+dry run downloads and tests the candidate but does not alter plugins, config,
+the environment file, hooks, or the Gateway. Enable live deployment only after
+that succeeds:
+
+```bash
+python3 ops/hermes_dispatch_update.py install --profile default --apply
+```
+
+On macOS this installs a per-profile LaunchAgent below
+`~/Library/LaunchAgents`, with `RunAtLoad` and a 30-minute interval. On native
+Windows it installs a current-user, interactive, limited Scheduled Task named
+`Hermes_Dispatch_Update_<profile>`. Both adapters use absolute Python, Git and
+Hermes paths captured at install time. They run as the department user, never
+as root or `SYSTEM`, so Codex keyring/plugin authentication and profile-owned
+files keep the same owner.
+
+Windows uses `%LOCALAPPDATA%\hermes` for the default profile; macOS uses
+`~/.hermes`. Named profiles live below `profiles/<name>` on both platforms.
+The existing Bash installer remains available for manual macOS/Linux work, but
+the scheduled updater uses its Python implementation so Windows receives the
+same preflight, backup, replacement and rollback behavior without requiring
+Git Bash or WSL.
+
+Inspect scheduler registration and the last durable outcome:
+
+```bash
+python3 ops/hermes_dispatch_update.py status --profile default
+```
+
+Remove only the scheduler, preserving updater state, installed plugins and all
+Hermes data:
+
+```bash
+python3 ops/hermes_dispatch_update.py uninstall --profile default
+```
+
+### Managed State and Safety
+
+Each profile owns its own files:
+
+```text
+$HERMES_HOME/state/hermes-dispatch-update.json
+$HERMES_HOME/state/hermes-dispatch-update.lock
+$HERMES_HOME/updates/hermes-dispatch/
+$HERMES_HOME/update-staging/
+$HERMES_HOME/update-backups/
+```
+
+Only keys named in `ops/release.json` may be written. Environment defaults are
+added only when absent. QQ credentials, allowlists, `CODEX_HOME`, ports,
+WhatsApp state, unrelated hooks and all other local settings are outside the
+updater's Interface and remain untouched. It never upgrades Hermes or Codex;
+an incompatible commit is recorded as `blocked_by_hermes_version`.
+
+Before live mutation, every managed plugin is staged on the profile's own
+filesystem. Plugin roots, staging roots and backup roots must be real
+directories, not symlinks, junctions or Windows reparse points. All targets are
+preflighted before the Gateway is stopped. If `gateway_state.json` reports an
+active Agent, deployment is deferred instead of interrupting the turn.
+
+When the profile is idle, the updater:
+
+1. saves `config.yaml`, `.env`, and every changing plugin;
+2. stops only the target profile;
+3. swaps the staged plugin directories into place;
+4. applies the allowlisted config/default values and enables the declared
+   plugins and QQ toolsets;
+5. verifies `config check` and installed tree hashes;
+6. restarts the Gateway only if it was running before the update;
+7. requires a new QQ `Ready` log record and a deep Gateway status check.
+
+Any failure restores the exact saved files and plugins, restarts the prior
+Gateway when applicable, and records the candidate commit as blocked. The
+automatic scheduler will not retry that commit. After correcting the cause, an
+operator may deliberately retry it once:
+
+```bash
+python3 ops/hermes_dispatch_update.py run \
+  --profile default --apply --retry-blocked
+```
+
+The optional Codex QQ delivery hook is not silently trusted. Its script and
+definition may be updated separately, but a changed digest still requires
+human review through `/hooks`; plugin enablement is not evidence of hook trust.
+
+### Verification and Rollback
+
+The release manifest includes the updater's own regression plus every managed
+plugin regression. Test it without installing a scheduler:
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 python3 ops/test_hermes_dispatch_update.py -v
+python3 ops/hermes_dispatch_update.py run --profile default
+```
+
+For a live canary, install the scheduler without `--apply`, inspect its state
+and logs for at least one cycle, then reinstall it with `--apply`. Successful
+deployment requires the recorded commit, expected plugin hashes, enabled
+plugins/toolsets, a supervised target Gateway, and a fresh QQ `Ready` line.
+Backups are retained under `update-backups`; do not delete the latest successful
+pre-update backup until channel acceptance is complete.
+
 ## Permanent Message Snapshots
 
 `message-snapshot-store` 1.1.0 registers an explicit raw-event hook that
