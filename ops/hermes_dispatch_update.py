@@ -279,11 +279,16 @@ def tree_digest(root: Path) -> Optional[str]:
     return digest.hexdigest()
 
 
+def installation_root(home: Path) -> Path:
+    return home.parent.parent if home.parent.name == "profiles" else home
+
+
 def hermes_python(home: Path) -> str:
+    root = installation_root(home)
     candidates = [
-        home / "hermes-agent" / "venv" / "bin" / "python",
-        home / "hermes-agent" / ".venv" / "Scripts" / "python.exe",
-        home / "hermes-agent" / "venv" / "Scripts" / "python.exe",
+        root / "hermes-agent" / "venv" / "bin" / "python",
+        root / "hermes-agent" / ".venv" / "Scripts" / "python.exe",
+        root / "hermes-agent" / "venv" / "Scripts" / "python.exe",
     ]
     for candidate in candidates:
         if candidate.is_file():
@@ -339,11 +344,12 @@ def version_tuple(value: str) -> tuple[int, int, int]:
 
 def run_regressions(checkout: Path, home: Path, manifest: dict[str, Any], git: str) -> None:
     python = hermes_python(home)
+    root = installation_root(home)
     with tempfile.TemporaryDirectory(prefix="hermes-dispatch-update-test-") as tmp:
         env = os.environ.copy()
         env.update(
             HERMES_HOME=tmp,
-            PYTHONPATH=str(home / "hermes-agent"),
+            PYTHONPATH=str(root / "hermes-agent"),
             PYTHONDONTWRITEBYTECODE="1",
         )
         for relative in manifest["tests"]:

@@ -78,6 +78,12 @@ class UpdaterTests(unittest.TestCase):
         with self.assertRaises(ops.UpdateError):
             ops.profile_home("../escape", platform="darwin", home=home)
 
+    def test_named_profile_uses_shared_hermes_install(self) -> None:
+        root = Path("/Users/team/.hermes")
+        profile = root / "profiles" / "sales"
+        self.assertEqual(ops.installation_root(root), root)
+        self.assertEqual(ops.installation_root(profile), root)
+
     def test_manifest_rejects_unmanaged_and_unsafe_fields(self) -> None:
         manifest = {
             "schema": 1,
