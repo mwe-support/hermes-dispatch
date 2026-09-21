@@ -2,6 +2,7 @@
 import asyncio
 import base64
 import importlib.util
+import os
 import tempfile
 from pathlib import Path
 from types import SimpleNamespace
@@ -234,6 +235,8 @@ async def main():
         # A basename is data, not Markdown syntax. It must neither open a
         # fence that hides native MEDIA nor close one that exposes examples.
         for name in ('~~~report.txt', '```report.txt', '> report.txt', 'name ` code.txt'):
+            if os.name == 'nt' and '>' in name:
+                continue
             odd = Path(tmp, name)
             odd.write_bytes(b'odd-name output')
             reference = f'[real]({odd.as_uri()})'

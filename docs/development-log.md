@@ -31,6 +31,13 @@ runtime and skips only those two symlink assertions when Windows returns error
 security boundaries are unchanged. Revert this test-only change to restore the
 stricter host-privilege requirement.
 
+The fourth Windows canary exposed two more host-dependent fixtures. The Codex
+App registration check now starts with its opt-in disabled so a machine-level
+environment setting cannot pre-register the fixture before the call-count
+assertion. The QQ filename suite omits only the `>` basename on Windows, where
+the filesystem rejects that character before message parsing is exercised.
+All legal-name coverage remains active; runtime behavior is unchanged.
+
 ## 2026-08-31 — Move accepted QQ steering to a new display segment
 
 Version 1.8.21 compensates for Hermes 0.20.5 preserving one cumulative native

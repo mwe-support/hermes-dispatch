@@ -97,6 +97,7 @@ def main():
     }
     with tempfile.TemporaryDirectory() as session_tmp:
         os.environ["HERMES_HOME"] = session_tmp
+        os.environ[mod.session_project.REGISTER_APP_ENV] = "false"
         backfill_key = "agent:main:qqbot:group:old-route"
         backfill_session = "20260701_010203_backfill"
         sessions_dir = Path(session_tmp, "sessions")
