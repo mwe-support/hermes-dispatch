@@ -101,6 +101,11 @@ the scheduled updater uses its Python implementation so Windows receives the
 same preflight, backup, replacement and rollback behavior without requiring
 Git Bash or WSL.
 
+The Windows Scheduled Task invokes a short profile-local `.cmd` wrapper. The
+wrapper holds the absolute Python, Git, Hermes and updater arguments; keeping
+the Task Scheduler `/TR` value short avoids Windows' 261-character action
+limit without relying on shell `PATH` lookup.
+
 Inspect scheduler registration and the last durable outcome:
 
 ```bash

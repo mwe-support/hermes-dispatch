@@ -166,6 +166,38 @@ class UpdaterTests(unittest.TestCase):
         self.assertTrue(ops.gateway_running({"gateway_state": "running", "pid": os.getpid()}))
         self.assertFalse(ops.gateway_running({"gateway_state": "stopped", "pid": os.getpid()}))
 
+    def test_windows_process_probe_uses_minimal_native_handle(self) -> None:
+        class Kernel:
+            def __init__(self, handle=123, wait=0x102, error=0):
+                self.handle, self.wait, self.error, self.closed = handle, wait, error, []
+
+            def OpenProcess(self, access, inherit, pid):
+                self.opened = (access, inherit, pid)
+                return self.handle
+
+            def WaitForSingleObject(self, handle, timeout):
+                return self.wait
+
+            def CloseHandle(self, handle):
+                self.closed.append(handle)
+
+            def get_last_error(self):
+                return self.error
+
+        live = Kernel()
+        self.assertTrue(ops.windows_process_alive(42, live))
+        self.assertEqual(live.opened, (0x00100000, False, 42))
+        self.assertEqual(live.closed, [123])
+        self.assertTrue(ops.windows_process_alive(42, Kernel(handle=0, error=5)))
+        self.assertFalse(ops.windows_process_alive(42, Kernel(handle=0, error=87)))
+
+    def test_locked_temp_cleanup_retries(self) -> None:
+        with patch.object(ops.shutil, "rmtree", side_effect=[PermissionError(), None]) as remove, patch.object(
+            ops.time, "sleep"
+        ):
+            self.assertTrue(ops.remove_tree_with_retries(Path("locked"), timeout=1))
+        self.assertEqual(remove.call_count, 2)
+
     def test_desired_state_detects_disabled_plugin(self) -> None:
         manifest = {
             "config_set": {},
@@ -299,15 +331,12 @@ class UpdaterTests(unittest.TestCase):
         self.assertTrue(payload["StandardErrorPath"].startswith(str(home)))
 
     def test_windows_task_contract_is_interactive_and_limited(self) -> None:
-        command = [
-            r"C:\Program Files\Python\python.exe",
-            r"C:\Users\team\AppData\Local\hermes\bin\update.py",
-            "run",
-            "--apply",
-        ]
+        task_command = subprocess.list2cmdline(
+            ["cmd.exe", "/d", "/c", r"C:\h\hermes-dispatch-update.cmd"]
+        )
         args = ops.windows_task_create_args(
             "Hermes_Dispatch_Update_default",
-            command,
+            task_command,
             1800,
             r"ORG\team",
         )
@@ -315,7 +344,8 @@ class UpdaterTests(unittest.TestCase):
         self.assertEqual(args[args.index("/RL") + 1], "LIMITED")
         self.assertEqual(args[args.index("/RU") + 1], r"ORG\team")
         self.assertEqual(args[args.index("/MO") + 1], "30")
-        self.assertIn("python.exe", args[args.index("/TR") + 1])
+        self.assertIn("update.cmd", args[args.index("/TR") + 1])
+        self.assertLessEqual(len(args[args.index("/TR") + 1]), 261)
 
 
 def shutil_which_git() -> str:

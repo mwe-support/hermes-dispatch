@@ -345,10 +345,11 @@ def version_tuple(value: str) -> tuple[int, int, int]:
 def run_regressions(checkout: Path, home: Path, manifest: dict[str, Any], git: str) -> None:
     python = hermes_python(home)
     root = installation_root(home)
-    with tempfile.TemporaryDirectory(prefix="hermes-dispatch-update-test-") as tmp:
+    tmp = Path(tempfile.mkdtemp(prefix="hermes-dispatch-update-test-"))
+    try:
         env = os.environ.copy()
         env.update(
-            HERMES_HOME=tmp,
+            HERMES_HOME=str(tmp),
             PYTHONPATH=str(root / "hermes-agent"),
             PYTHONDONTWRITEBYTECODE="1",
         )
@@ -357,7 +358,27 @@ def run_regressions(checkout: Path, home: Path, manifest: dict[str, Any], git: s
             if not path.is_file():
                 raise UpdateError(f"declared regression does not exist: {relative}")
             run([python, path], cwd=checkout, env=env, timeout=300)
+    finally:
+        # ponytail: Windows SQLite handles may outlive a completed regression
+        # subprocess briefly. Retry, then let the OS clean a locked temp tree
+        # later instead of turning a passing suite into a deployment failure.
+        if not remove_tree_with_retries(tmp):
+            print(f"warning: deferred cleanup of locked regression directory: {tmp}", file=sys.stderr)
     run([git, "diff", "--check"], cwd=checkout, timeout=30)
+
+
+def remove_tree_with_retries(path: Path, timeout: float = 15.0) -> bool:
+    deadline = time.monotonic() + timeout
+    while True:
+        try:
+            shutil.rmtree(path)
+            return True
+        except FileNotFoundError:
+            return True
+        except OSError:
+            if time.monotonic() >= deadline:
+                return False
+            time.sleep(0.25)
 
 
 def read_gateway_state(home: Path) -> dict[str, Any]:
@@ -373,12 +394,7 @@ def process_alive(pid: Any) -> bool:
     if number <= 0:
         return False
     if os.name == "nt":
-        result = run(
-            ["tasklist", "/FI", f"PID eq {number}", "/FO", "CSV", "/NH"],
-            check=False,
-            timeout=15,
-        )
-        return result.returncode == 0 and f'"{number}"' in result.stdout
+        return windows_process_alive(number)
     try:
         os.kill(number, 0)
         return True
@@ -386,6 +402,32 @@ def process_alive(pid: Any) -> bool:
         return False
     except PermissionError:
         return True
+
+
+def windows_process_alive(pid: int, kernel32: Any = None) -> bool:
+    if kernel32 is None:
+        import ctypes
+        from ctypes import wintypes
+
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+        kernel32.OpenProcess.restype = wintypes.HANDLE
+        kernel32.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+        kernel32.WaitForSingleObject.restype = wintypes.DWORD
+        kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+        kernel32.CloseHandle.restype = wintypes.BOOL
+        get_last_error = ctypes.get_last_error
+    else:
+        get_last_error = kernel32.get_last_error
+    # SYNCHRONIZE is sufficient for a liveness probe and avoids tasklist/WMI,
+    # which locked-down enterprise Windows policies commonly deny.
+    handle = kernel32.OpenProcess(0x00100000, False, int(pid))
+    if not handle:
+        return int(get_last_error()) == 5  # Access denied means the PID exists.
+    try:
+        return int(kernel32.WaitForSingleObject(handle, 0)) == 0x00000102
+    finally:
+        kernel32.CloseHandle(handle)
 
 
 def gateway_running(state: dict[str, Any]) -> bool:
@@ -840,7 +882,7 @@ def macos_plist_payload(
 
 def windows_task_create_args(
     task: str,
-    command: list[str],
+    task_command: str,
     interval: int,
     principal: str,
 ) -> list[str]:
@@ -854,7 +896,7 @@ def windows_task_create_args(
         "/TN",
         task,
         "/TR",
-        subprocess.list2cmdline(command),
+        task_command,
         "/RL",
         "LIMITED",
         "/RU",
@@ -887,7 +929,13 @@ def install_scheduler(args: argparse.Namespace) -> dict[str, Any]:
         domain = os.environ.get("USERDOMAIN", "").strip()
         user = os.environ.get("USERNAME", "").strip() or getpass.getuser()
         principal = f"{domain}\\{user}" if domain else user
-        run(windows_task_create_args(task, command, args.interval, principal), timeout=45)
+        wrapper = home / "bin" / "hermes-dispatch-update.cmd"
+        wrapper_body = "@echo off\r\n" + subprocess.list2cmdline(command) + "\r\n"
+        atomic_write(wrapper, wrapper_body.encode("utf-8"))
+        task_command = subprocess.list2cmdline(["cmd.exe", "/d", "/c", str(wrapper)])
+        if len(task_command) > 261:
+            raise UpdateError(f"Windows Scheduled Task command exceeds 261 characters: {task_command}")
+        run(windows_task_create_args(task, task_command, args.interval, principal), timeout=45)
         run(["schtasks", "/Run", "/TN", task], check=False, timeout=30)
         return {"status": "installed", "adapter": "scheduled-task", "path": task, "apply": args.apply}
 
