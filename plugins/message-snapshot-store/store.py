@@ -19,6 +19,17 @@ from typing import Any, Iterable
 
 from .config import SnapshotConfig
 
+
+class _ClosingConnection(sqlite3.Connection):
+    """Commit/rollback normally, then release SQLite locks on Windows."""
+
+    def __exit__(self, exc_type, exc, traceback):
+        try:
+            return super().__exit__(exc_type, exc, traceback)
+        finally:
+            self.close()
+
+
 SCHEMA_VERSION = 1
 
 
@@ -115,7 +126,9 @@ class SnapshotStore:
         self.config = config
 
     def _connect(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self.config.db_path, timeout=30.0)
+        conn = sqlite3.connect(
+            self.config.db_path, timeout=30.0, factory=_ClosingConnection
+        )
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA foreign_keys=ON")
         conn.execute("PRAGMA busy_timeout=30000")

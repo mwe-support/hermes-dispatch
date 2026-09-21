@@ -37,6 +37,16 @@ from pathlib import Path
 from typing import Any, Callable, Optional
 
 
+class _ClosingConnection(sqlite3.Connection):
+    """Commit/rollback normally, then release SQLite locks on Windows."""
+
+    def __exit__(self, exc_type, exc, traceback):
+        try:
+            return super().__exit__(exc_type, exc, traceback)
+        finally:
+            self.close()
+
+
 logger = logging.getLogger(__name__)
 
 ENABLED_ENV = "HERMES_CODEX_SESSION_PROJECTS_ENABLED"
@@ -247,7 +257,9 @@ class SessionProjectStore:
 
     def _connect(self) -> sqlite3.Connection:
         self.db_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-        conn = sqlite3.connect(str(self.db_path), timeout=15.0)
+        conn = sqlite3.connect(
+            str(self.db_path), timeout=15.0, factory=_ClosingConnection
+        )
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA busy_timeout=15000")

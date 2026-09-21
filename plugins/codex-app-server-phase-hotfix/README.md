@@ -34,6 +34,18 @@ The plugin forwards explicit `commentary`, suppresses explicit `final_answer`,
 and defers unknown-phase messages until later turn activity proves they are
 interim. The Codex session projector remains authoritative for final text.
 
+## Windows SQLite lifecycle (1.8.6)
+
+Version 1.8.6 closes every session-project SQLite connection when its context
+exits. Python's default `sqlite3.Connection` context manager commits or rolls
+back but does not close the handle; POSIX permits deleting that still-open
+database, while native Windows returns `WinError 32` and breaks isolated
+regressions, profile cleanup and updater rollback. The store now preserves the
+same transaction semantics and releases the handle deterministically. It also
+validates the Windows full-width-colon project basename in the cross-platform
+regression. No configuration change is required. Roll back with the external
+plugin backup, understanding that Windows database locks return with 1.8.5.
+
 For completed `imageGeneration` items, the plugin validates and atomically
 writes the image to:
 

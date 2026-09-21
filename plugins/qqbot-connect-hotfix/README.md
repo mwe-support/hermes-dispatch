@@ -24,6 +24,14 @@ structured self-mention gating, emoji-only group mentions, reply `msg_id`
 handling, native C2C streaming, bounded input notifications, markdown fallback,
 and media caption compatibility.
 
+Version 1.8.26 accepts native Windows drive-absolute output links such as
+`C:\\...\\report.pdf` and converts `file:///C:/...` URLs with the platform's
+standard URL-to-path conversion before passing them to Hermes' existing strict
+media-path validator. UNC/network paths remain outside this compatibility
+addition. This fixes validated local outputs being left as text instead of
+uploaded by QQ on Windows; it does not weaken allowed-root or ACL checks. No
+new setting is required. Reverting to 1.8.25 restores the Windows omission.
+
 Version 1.8.19 closes the remaining Issue #3 lifetime and failure-storm gaps.
 Transport timeouts and disconnect-style errors are ambiguous because QQ may
 have consumed a frame before the response was lost. The plugin now retains the

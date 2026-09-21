@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import argparse
 import copy
-import fcntl
+import contextlib
 import hashlib
 import json
 import os
@@ -18,6 +18,32 @@ import shlex
 import stat
 import sys
 import tempfile
+
+
+@contextlib.contextmanager
+def exclusive_file_lock(path: Path):
+    with path.open("a+b") as lock:
+        lock.seek(0)
+        if lock.read(1) == b"":
+            lock.write(b"\0")
+            lock.flush()
+        lock.seek(0)
+        if os.name == "nt":
+            import msvcrt
+
+            msvcrt.locking(lock.fileno(), msvcrt.LK_LOCK, 1)
+        else:
+            import fcntl
+
+            fcntl.flock(lock, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            lock.seek(0)
+            if os.name == "nt":
+                msvcrt.locking(lock.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
+                fcntl.flock(lock, fcntl.LOCK_UN)
 
 
 def regular_path(path: Path):
@@ -61,8 +87,7 @@ def manage(hermes_home: Path, codex_home: Path, *, remove=False, python=sys.exec
         regular_path(path)
     # Serialize our installers even when two profiles accidentally target the
     # same CODEX_HOME. Its persisted owner below prevents cross-profile writes.
-    with lock_path.open("a") as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX)
+    with exclusive_file_lock(lock_path):
         return _manage_locked(profile, home, hooks_path, state_path, remove, python)
 
 

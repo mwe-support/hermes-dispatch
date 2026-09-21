@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import importlib.util
-import sqlite3
 import sys
 import tempfile
 from pathlib import Path
@@ -102,7 +101,7 @@ with tempfile.TemporaryDirectory() as tmp:
     assert store.stats()["archived_bytes"] == 0
 
     # Startup migration repairs snapshots produced by the pre-fix plugin.
-    with sqlite3.connect(store.config.db_path) as conn:
+    with store._connect() as conn:
         conn.execute(
             "UPDATE attachments SET local_path='', sha256='', byte_size=NULL, archive_status='pending' WHERE message_snapshot_id=?",
             (snapshot_id,),

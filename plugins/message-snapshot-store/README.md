@@ -19,6 +19,13 @@ is available. Repeated observation by nested wrappers is deduplicated by event
 type and canonical payload hash. It does not modify files inside the Hermes
 installation.
 
+Version 1.1.1 closes every snapshot SQLite connection when its transaction
+context exits. The standard Python context manager does not close a connection;
+on Windows that retained handle caused `WinError 32` during temporary-profile
+cleanup and automatic rollback. Transaction behavior and the database schema
+are unchanged. No configuration or migration is required. Restoring 1.1.0 from
+the installer backup restores the previous Windows handle lifetime.
+
 For WhatsApp, the plugin wraps Hermes' deferred `WhatsAppAdapter` factory and
 captures each normalized Baileys `messages.upsert` bridge event before
 `_build_message_event` applies the mention-response gate. An unmentioned group

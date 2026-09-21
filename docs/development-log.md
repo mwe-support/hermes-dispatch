@@ -1,5 +1,27 @@
 # Development Log
 
+## 2026-09-21 — Native Windows updater and plugin regression compatibility
+
+The first real Windows canary for the cross-platform dispatch updater exposed
+three updater defects: enterprise policy denied `tasklist`, Task Scheduler
+rejected a `/TR` command longer than 261 characters, and delayed SQLite handles
+turned passing regressions into `WinError 32` cleanup failures. The updater now
+uses `OpenProcess(SYNCHRONIZE)` for PID liveness, a short profile-local `.cmd`
+wrapper for the Scheduled Task action, and bounded best-effort cleanup for its
+outer regression directory. The canary verified InteractiveToken, Limited,
+PT30M and a successful immediate task run without touching the default profile.
+
+The second Windows canary then isolated plugin-test defects rather than
+bypassing the release gate. Codex project and snapshot stores now close SQLite
+connections at transaction exit, the project test expects the portable Windows
+basename, QQ output extraction accepts validated drive-absolute paths, and the
+Codex hook installer uses `msvcrt` locking on Windows instead of importing
+`fcntl`. These changes are versions 1.8.6, 1.8.26 and 1.1.1 respectively. No
+ACL or allowed-root relaxation was added. Rollback uses the updater's exact
+pre-update backup; reverting restores the old Windows failures. macOS and the
+full release manifest regressions must remain green before another Windows
+canary is allowed to apply.
+
 ## 2026-08-31 — Move accepted QQ steering to a new display segment
 
 Version 1.8.21 compensates for Hermes 0.20.5 preserving one cumulative native

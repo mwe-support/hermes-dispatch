@@ -125,7 +125,7 @@ def main():
         session_b = "20260825_110000_bbbbbbbb"
         binding_a = store.ensure_binding(key, session_a)
         assert binding_a.project_name == key
-        assert Path(binding_a.project_path).name == key
+        assert Path(binding_a.project_path).name == mod.session_project._session_key_project_basename(key)
         assert Path(binding_a.project_path, "AGENTS.md").is_file()
         assert Path(binding_a.project_path, "PROJECT_MEMORY.md").is_file()
         manifest = json.loads(

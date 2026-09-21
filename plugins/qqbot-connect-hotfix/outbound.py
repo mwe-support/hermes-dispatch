@@ -10,6 +10,7 @@ import re
 import shlex
 from pathlib import Path
 from urllib.parse import quote, unquote, urlsplit
+from urllib.request import url2pathname
 import uuid
 from typing import Any, Awaitable, Callable, Dict
 
@@ -358,14 +359,22 @@ def _qq_output_files(text: str, session_key: str = ""):
             path = attrs["path"]
             candidates.append((match.start(), match.end(), quote(path, safe="/~")))
     for start, end, target in sorted(candidates):
-        try:
-            parsed = urlsplit(target)
-        except ValueError:
-            continue
-        if parsed.scheme not in {"", "file"} or parsed.netloc or parsed.query or parsed.fragment:
-            continue
-        path = unquote(parsed.path)
-        if not path.startswith(("/", "~/")) or re.search(r":\d+(?::\d+)?$", path):
+        decoded_target = unquote(target)
+        windows_absolute = bool(re.match(r"^[A-Za-z]:[\\/]", decoded_target))
+        if windows_absolute:
+            path = decoded_target
+        else:
+            try:
+                parsed = urlsplit(target)
+            except ValueError:
+                continue
+            if parsed.scheme not in {"", "file"} or parsed.netloc or parsed.query or parsed.fragment:
+                continue
+            path = url2pathname(unquote(parsed.path)) if parsed.scheme == "file" else unquote(parsed.path)
+        if (
+            not path.startswith(("/", "~/"))
+            and not re.match(r"^[A-Za-z]:[\\/]", path)
+        ) or re.search(r":\d+(?::\d+)?$", path):
             continue  # Source citations are not attachments.
         safe = _validate_output_path(path, session_key)
         if not safe or any(c in safe for c in '\n\r"'):

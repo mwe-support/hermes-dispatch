@@ -129,7 +129,7 @@ hermes -p default gateway stop
 整份 `config.yaml`。
 
 QQ 文件桥接在官方 Hermes 0.20.5 上须使用 **qqbot-connect-hotfix 1.8.24 或更高版本**；
-当前应安装 **1.8.25 或更高版本**，同时修复真实输出位于末尾引用/未闭合围栏之前时丢附件的 P2。
+当前应安装 **1.8.26 或更高版本**，同时包含末尾引用/未闭合围栏修复和 Windows 本地输出路径兼容。
 1.8.22/1.8.23 错向旧路径校验器传递 `session_key`，会破坏已有 MEDIA 附件。
 1.8.24 按实际函数签名兼容官方 `v2026.8.19`（`fcbd1076a`）与
 `v2026.8.31`（`29112bef`），不要求为了文件桥接升级 Hermes。开发提交的版本字段
@@ -278,7 +278,7 @@ hermes -p default approvals suggest --apply 1,2
 不会被加入建议列表。
 
 **QQ/WhatsApp 的模型入口仍是 Hermes slash 命令。** 使用
-`codex-app-server-phase-hotfix` **1.8.5 或更高版本**，将 Hermes 已解析的模型和推理强度
+`codex-app-server-phase-hotfix` **1.8.6 或更高版本**，将 Hermes 已解析的模型和推理强度
 传给原生 Codex。官方 Hermes 0.20.5/0.21.0 的原始调用遗漏这些参数；只在 Hermes 中
 看到切换成功不足以证明生效，验收还须核对下一轮 Codex `turn_context`。
 
@@ -655,7 +655,7 @@ Hermes profile 占用同一个 Codex home 的托管 hook。来源标记
 
 ### 9.2 已知限制：Hermes MCP 插件加载
 
-2026-09-07 在 `codex-app-server-phase-hotfix` 1.8.5 上仍可复现：独立
+2026-09-07 首次在 1.8.5 上复现，1.8.6 仍未改变此边界：独立
 `hermes-tools` MCP 子进程加载插件时，`model_tools` 与 `run_agent` 循环导入，报
 `cannot import name 'get_tool_definitions' from partially initialized module 'model_tools'`。
 MCP 握手、工具列表和已验证的 `skills_list` 调用仍可成功；这不代表该插件在 MCP

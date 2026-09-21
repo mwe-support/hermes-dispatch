@@ -1,5 +1,5 @@
 name: message-snapshot-store
-version: 1.1.0
+version: 1.1.1
 description: "Persistent QQ and WhatsApp message snapshots with content-addressed media archives, bounded recent context, and hybrid BM25 retrieval."
 author: local
 kind: standalone
