@@ -188,7 +188,11 @@ def main():
             )
             conn.commit()
         migrated = store.ensure_binding(legacy_key, legacy_session)
-        migrated_path = Path(session_tmp, "codex-projects", legacy_key).resolve()
+        migrated_path = Path(
+            session_tmp,
+            "codex-projects",
+            mod.session_project._session_key_project_basename(legacy_key),
+        ).resolve()
         assert migrated.project_name == legacy_key
         assert Path(migrated.project_path) == migrated_path
         assert migrated.thread_id == legacy_thread

@@ -22,6 +22,15 @@ pre-update backup; reverting restores the old Windows failures. macOS and the
 full release manifest regressions must remain green before another Windows
 canary is allowed to apply.
 
+The third Windows canary found only test portability gaps: one migration
+assertion still built the expected project path from raw colons, and two
+symlink safety assertions assumed the current user held Windows symbolic-link
+privilege. The regression now uses the same portable basename helper as the
+runtime and skips only those two symlink assertions when Windows returns error
+1314; every other setup error still fails the gate. Runtime behavior and
+security boundaries are unchanged. Revert this test-only change to restore the
+stricter host-privilege requirement.
+
 ## 2026-08-31 — Move accepted QQ steering to a new display segment
 
 Version 1.8.21 compensates for Hermes 0.20.5 preserving one cumulative native

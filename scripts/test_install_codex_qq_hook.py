@@ -78,14 +78,19 @@ def main():
         # Shared hook files and operator edits are never silently overwritten.
         shared = root / "shared-hooks.json"
         shared.write_text('{}')
-        (homes[1] / "hooks.json").symlink_to(shared)
         try:
-            installer.manage(profiles[1], homes[1])
-            assert False, "shared symlink was accepted"
-        except ValueError:
-            pass
-        assert shared.read_text() == '{}'
-        (homes[1] / "hooks.json").unlink()
+            (homes[1] / "hooks.json").symlink_to(shared)
+        except OSError as exc:
+            if getattr(exc, "winerror", None) != 1314:
+                raise
+        else:
+            try:
+                installer.manage(profiles[1], homes[1])
+                assert False, "shared symlink was accepted"
+            except ValueError:
+                pass
+            assert shared.read_text() == '{}'
+            (homes[1] / "hooks.json").unlink()
 
         # A partial two-file write failure restores the prior hook config.
         original_write = installer.write_bytes

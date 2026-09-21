@@ -161,9 +161,14 @@ async def main():
                      f'`:codex-file-citation{{path="{output}" purpose="output"}}`'):
             assert delivery._qq_output_files(text, key) == ([], text), text
         secret_link = Path(tmp, 'secret.txt')
-        secret_link.symlink_to('/etc/passwd')
-        text = f'[secret]({secret_link})'
-        assert delivery._qq_output_files(text, key) == ([], text)
+        try:
+            secret_link.symlink_to('/etc/passwd')
+        except OSError as exc:
+            if getattr(exc, 'winerror', None) != 1314:
+                raise
+        else:
+            text = f'[secret]({secret_link})'
+            assert delivery._qq_output_files(text, key) == ([], text)
         # The runtime/streamed text is untouched; only QQ's final extraction
         # accepts output references. Base extraction used by history is intact.
         from gateway.platforms.base import BasePlatformAdapter
