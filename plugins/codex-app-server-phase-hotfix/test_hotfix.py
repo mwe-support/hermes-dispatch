@@ -362,19 +362,20 @@ def main():
             binding_a.project_path,
             platform="win32",
         ) == [r"C:\\Codex\\codex.exe", "app", binding_a.project_path]
-        assert mod.session_project._codex_app_command(
-            "/opt/codex/bin/codex",
-            binding_a.project_path,
-            platform="darwin",
-            user_id=501,
-        ) == [
-            "/bin/launchctl",
-            "asuser",
-            "501",
-            "/opt/codex/bin/codex",
-            "app",
-            binding_a.project_path,
-        ]
+        with patch.object(mod.session_project.Path, "is_file", return_value=True):
+            assert mod.session_project._codex_app_command(
+                "/opt/codex/bin/codex",
+                binding_a.project_path,
+                platform="darwin",
+                user_id=501,
+            ) == [
+                "/bin/launchctl",
+                "asuser",
+                "501",
+                "/opt/codex/bin/codex",
+                "app",
+                binding_a.project_path,
+            ]
         os.environ[mod.session_project.REGISTER_APP_ENV] = "false"
 
         # A prompt-callable project bind is admin-gated, resolves only an

@@ -38,6 +38,13 @@ assertion. The QQ filename suite omits only the `>` basename on Windows, where
 the filesystem rejects that character before message parsing is exercised.
 All legal-name coverage remains active; runtime behavior is unchanged.
 
+The fifth Windows canary produced the missing deterministic traceback: the
+cross-platform Codex App command test selected `platform="darwin"` but still
+queried the Windows host for `/bin/launchctl`. The test now mocks that single
+platform prerequisite while exercising the unchanged command builder. The two
+previously reported QQ failures passed on immediate Windows rerun. Revert this
+test-only change to restore the host-dependent assertion.
+
 ## 2026-08-31 — Move accepted QQ steering to a new display segment
 
 Version 1.8.21 compensates for Hermes 0.20.5 preserving one cumulative native
