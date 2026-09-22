@@ -24,6 +24,16 @@ structured self-mention gating, emoji-only group mentions, reply `msg_id`
 handling, native C2C streaming, bounded input notifications, markdown fallback,
 and media caption compatibility.
 
+Version 1.8.27 supplements Hermes 0.20.5 bare-file extraction for Windows 8.3
+short paths such as `C:\\Users\\ADMINI~1\\...\\report.pdf`. Hermes' upstream
+pattern accepts drive letters but excludes `~` inside later path segments, so
+valid files created below `%TEMP%` could remain plain text and never reach QQ's
+uploader. The fallback runs only for drive-absolute paths containing `~`, masks
+code/example spans, and passes every candidate through Hermes' existing media
+path validator; it does not add UNC support or relax filesystem policy. No new
+setting is required. Verify with `test_file_delivery.py`; roll back to 1.8.26
+to remove this compatibility fallback.
+
 Version 1.8.26 accepts native Windows drive-absolute output links such as
 `C:\\...\\report.pdf` and converts `file:///C:/...` URLs with the platform's
 standard URL-to-path conversion before passing them to Hermes' existing strict

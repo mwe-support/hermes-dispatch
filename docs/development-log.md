@@ -45,6 +45,13 @@ platform prerequisite while exercising the unchanged command builder. The two
 previously reported QQ failures passed on immediate Windows rerun. Revert this
 test-only change to restore the host-dependent assertion.
 
+The sixth Windows canary exposed an upstream Hermes 0.20.5 bare-path gap:
+Administrator's `%TEMP%` resolved through `C:\\Users\\ADMINI~1`, but the native
+extractor excludes `~` from drive-path segments. QQ hotfix 1.8.27 adds a
+drive-absolute, tilde-only fallback after example masking and reuses Hermes'
+media-path validator. No policy or UNC expansion is introduced. Verify with
+`test_file_delivery.py`; rollback to 1.8.26 removes the fallback.
+
 ## 2026-08-31 — Move accepted QQ steering to a new display segment
 
 Version 1.8.21 compensates for Hermes 0.20.5 preserving one cumulative native

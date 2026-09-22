@@ -78,6 +78,15 @@ async def main():
         for validator in (old_validate, new_validate):
             with patch.object(BasePlatformAdapter, 'validate_media_delivery_path', staticmethod(validator)):
                 assert delivery._validate_output_path(str(output), 'test-session') == str(output)
+        windows_short = r'C:\Users\ADMINI~1\AppData\Local\Temp\report.txt'
+        with patch.object(
+            BasePlatformAdapter,
+            'validate_media_delivery_path',
+            staticmethod(lambda path, session_key='': path),
+        ):
+            assert RecordingQQ.extract_local_files(windows_short) == ([windows_short], '')
+            protected_short = f'`{windows_short}`'
+            assert RecordingQQ.extract_local_files(protected_short) == ([], protected_short)
         def broken_validate(path, session_key=""):
             raise TypeError('internal validator failure')
         with patch.object(BasePlatformAdapter, 'validate_media_delivery_path', staticmethod(broken_validate)):

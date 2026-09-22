@@ -399,6 +399,30 @@ def _qq_output_files(text: str, session_key: str = ""):
     return media, text
 
 
+def _windows_short_bare_files(content: str):
+    """Recover validated 8.3-style paths missed by Hermes' bare-path regex."""
+    from gateway.platforms.base import MEDIA_DELIVERY_EXTS
+
+    visible = content
+    for start, end in _qq_example_spans(content):
+        visible = visible[:start] + " " * (end - start) + visible[end:]
+    extensions = "|".join(re.escape(ext.lstrip(".")) for ext in MEDIA_DELIVERY_EXTS)
+    pattern = re.compile(
+        r"(?<![/\:\w.])([A-Za-z]:[/\\](?:[\w.~\-]+[/\\])*[\w.~\-]+\."
+        rf"(?:{extensions})\b)",
+        re.IGNORECASE,
+    )
+    files = []
+    for match in pattern.finditer(visible):
+        raw = match.group(1)
+        if "~" not in raw:
+            continue
+        safe = _validate_output_path(raw)
+        if safe:
+            files.append((raw, safe))
+    return files
+
+
 def patch_output_file_delivery(QQAdapter):
     """Expand QQ final-delivery syntax without changing streamed text."""
     original = QQAdapter.extract_media
@@ -423,7 +447,15 @@ def patch_output_file_delivery(QQAdapter):
 
     @functools.wraps(original_local)
     def extract_local_files(content):
-        return _extract_outside_examples(original_local, content)
+        paths, cleaned = _extract_outside_examples(original_local, content)
+        short_files = _windows_short_bare_files(content)
+        if not short_files:
+            return paths, cleaned
+        for raw, safe in short_files:
+            if safe not in paths:
+                paths.append(safe)
+            cleaned = cleaned.replace(raw, "")
+        return paths, re.sub(r"\n{3,}", "\n\n", cleaned).strip()
 
     QQAdapter.extract_local_files = staticmethod(extract_local_files)
 
