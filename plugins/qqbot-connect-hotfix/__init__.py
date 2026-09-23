@@ -11,6 +11,7 @@ from .channel_directory import (
     lookup_channel_directory_type as _lookup_channel_directory_type,
     patch_channel_directory_chat_type as _patch_channel_directory_chat_type,
 )
+from .cron_delivery import patch_cron_delivery as _patch_cron_delivery
 from .connect import patch_connect_signature as _patch_connect_signature
 from .emoji import (
     describe_qq_face_only_message as _describe_qq_face_only_message,
@@ -70,6 +71,7 @@ def register(ctx):
     _patch_media_caption_retry(QQAdapter)
     _patch_output_file_delivery(QQAdapter)
     _defer_gateway_methods(QQAdapter)
+    _patch_cron_delivery(QQAdapter)
 
 
 def _defer_gateway_methods(QQAdapter):

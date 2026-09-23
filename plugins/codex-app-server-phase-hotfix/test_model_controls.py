@@ -120,12 +120,17 @@ def main():
                 api_key='test-only', base_url='https://chatgpt.com/backend-api/codex',
                 api_mode='codex_app_server', is_global=kwargs.get('is_global', False))
 
+        from run_agent import AIAgent
+
+        class TestAgent(SimpleNamespace):
+            release_clients = AIAgent.release_clients
+
         def resolved_agent(runner, source, existing=None):
             key = runner._session_key_for_source(source)
             cfg = yaml.safe_load(config_path.read_text())
             model, _ = runner._apply_session_model_override(key, cfg['model']['default'], {})
             reasoning = runner._resolve_session_reasoning_config(source=source, model=model)
-            agent = existing or SimpleNamespace(_gateway_session_key=key, session_id='test-session',
+            agent = existing or TestAgent(_gateway_session_key=key, session_id='test-session',
                 session_cwd=tmp, _codex_session=None, _skill_nudge_interval=0,
                 _session_db=None, session_api_calls=0, context_compressor=None)
             agent.model, agent.reasoning_config = model, reasoning
@@ -169,7 +174,8 @@ def main():
                 await runner._handle_reasoning_command(event(platform, '/reasoning none'))
                 assert run(resolved_agent(runner, source, agent)) == thread
                 # Rebuild the Agent like a cache eviction/restart, then resume its thread.
-                agent._codex_session.close()
+                agent.release_clients()
+                assert agent._codex_session is None
                 agent = resolved_agent(runner, source)
                 assert run(agent) == thread
                 resume = next(m['params'] for m in agent._codex_session._client.sent

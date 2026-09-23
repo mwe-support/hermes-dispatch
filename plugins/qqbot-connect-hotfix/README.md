@@ -935,3 +935,78 @@ private/group chats: four real files were downloaded with matching bytes, zero
 example files uploaded. The exact four model replies each reproduce zero
 attachments through 1.8.24 and one through the fix. This is targeted delivery
 acceptance, not a claim about natural generation or unlimited input coverage.
+
+## Cron routing guard (1.8.29)
+
+[Issue #12](https://github.com/mwe-support/hermes-dispatch/issues/12) requires an
+explicit QQ target to survive home/origin defaults and cold type caches, with
+failed delivery recorded. This plugin installs removable runtime wrappers at
+Hermes' scheduler and QQ send boundaries; it does not edit Hermes core files.
+
+**Hermes owns this enforcement.** Codex `UserPromptSubmit` adds developer
+context and can block a prompt; it does not control the parent scheduler's send
+that happens after the turn, or `no_agent` jobs that never enter Codex. Keep the
+existing native Codex hook for the `MEDIA:` output contract. Do not use it to
+make the model choose cron recipients or send a second copy. See the
+[official hook contract](https://learn.chatgpt.com/docs/hooks#userpromptsubmit).
+
+For a single explicit `qqbot:<native-id>` target, the guard obtains the type
+from **this profile's** persisted `channel_directory.json`, or an origin with
+that exact platform and ID. It fixes the ID/type for the call. An unknown type
+returns a delivery error instead of guessing private chat or using home. A
+multi-target expression containing an explicit QQ target is rejected; use
+separate jobs for intentional fan-out. Other platforms remain unchanged.
+
+For newly addressed targets or old jobs using `deliver=qqbot`/`origin`, create
+`<HERMES_HOME>/cron/delivery-targets.json` using
+[delivery-targets.example.json](delivery-targets.example.json). Keys are real
+job IDs, not task display names:
+
+```json
+{
+  "YOUR_GROUP_CRON_JOB_ID": {
+    "chat_id": "YOUR_QQ_GROUP_OPENID",
+    "chat_type": "group"
+  },
+  "YOUR_PRIVATE_CRON_JOB_ID": {
+    "chat_id": "YOUR_QQ_USER_OPENID",
+    "chat_type": "c2c"
+  }
+}
+```
+
+Replace placeholders and omit unused entries. Do not commit live identifiers.
+`dm` is accepted as an alias of `c2c`. A group's bot-specific `group_openid` and
+a private conversation's `user_openid` are different identifiers; numeric QQ
+account/group numbers are not substitutes. Replace the JSON atomically when
+editing it. Pins are re-read at each delivery and use the context-local profile
+home. Malformed policy returns an error. `local` remains local; an explicit
+job target conflicting with its pin is rejected. Unpinned platform-only jobs
+retain upstream behavior, so configure a pin to override their home default.
+
+A guarded send requires the live native QQ adapter/Gateway loop. Text and media
+use the same fixed target and original safety checks/uploader. Failed sends
+never use standalone endpoint guessing. Success requires a QQ API `id` matching
+the adapter receipt, including media-only results; missing receipts/timeouts
+return an error. The scheduler persists `last_delivery_error` even when script
+execution itself is `last_status=ok`. Platform permission failures remain
+visible. An API receipt is not a substitute for observing client arrival.
+
+Enable with `scripts/install-plugins.sh <HERMES_HOME> qqbot-connect-hotfix` or the
+existing updater, then restart the selected idle Gateway. Configured pins and
+the directory live outside the plugin and survive replacement/restart. The
+Codex native hook script is unchanged; no new Codex hook definition is needed.
+
+Run `test_cron_delivery.py` with the Hermes Python and isolated home. The same
+matrix covers group/c2c/dm, cold/correct/stale caches, persisted directory/origin,
+unknown/conflicting targets, text/file/image and media-only sends, concurrent
+group/private jobs, profile isolation, failure persistence and missing receipts.
+It also executes a real `no_agent` script and asserts that no model runtime is
+imported. Only QQ HTTP is substituted. This test and the Codex cold-start test
+are required by the release manifest. Native Windows and live QQ acceptance
+must use the target deployment; isolated tests are not live-arrival evidence.
+
+Rollback with the installer's/updater's exact QQ plugin backup and restart.
+Removing a pin restores upstream routing only for platform-only jobs; explicit
+QQ jobs still use the directory/origin guard. Restore the old plugin to remove
+all runtime wrappers. This restores the previous home/type guessing risks.

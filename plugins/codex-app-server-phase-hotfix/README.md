@@ -152,12 +152,34 @@ same Gateway. Hermes' persisted command settings remain; older plugin versions
 again leave native Codex requests without these overrides. Remove this patch
 when the upstream runtime forwards the resolved Agent settings itself.
 
-The separate `hermes-tools` MCP startup import cycle remains a known limitation
-in 1.8.5. Verified Gateway commands and file delivery can work while this plugin
-fails to load in the MCP subprocess. It may be deferred when affected MCP tools
-are not required; this is not a claim of full MCP availability or a resolved
-import cycle. See the [macOS guide](../../docs/macos-hermes-codex-deployment.md)
-for the affected scope, acceptance criteria, and conditions for revisiting it.
+## Cold-start lifecycle registration (1.8.7)
+
+[Issue #9](https://github.com/mwe-support/hermes-dispatch/issues/9): registration
+previously imported `run_agent.AIAgent` while Hermes was still importing
+`model_tools` and discovering plugins. This caused a circular import, or a
+registry-lock/module-import-lock inversion during background discovery. Official
+Hermes v0.21.0 (`v2026.8.31`) still reaches this plugin path.
+
+Registration now wraps the existing Codex runtime entry without importing
+`run_agent`. At the first turn, the complete Agent class receives its idempotent
+soft-eviction patch before any Codex session is allocated. Idle-session cleanup,
+active-turn protection and upstream-equivalent detection remain in place. This
+also works with project mapping disabled and in CLI/cron entry points. No core
+file, worker thread or swallowed ImportError is involved.
+
+Enable via the existing plugin installer/updater and restart the idle target
+Gateway. No new setting or Codex hook trust change is required. Run
+`test_startup.py` with Hermes on `PYTHONPATH`: fresh isolated homes load all three
+plugins without safe mode, testing cold import, background discovery, cron and
+MCP module entry, then asserting patch activation before session allocation and
+idle/active cleanup behavior. Use a clean core checkout without a project `.env`
+for this credential-free startup check. The test is included in `ops/release.json`.
+It does not execute a production job or prove the MCP server exports every tool.
+
+Rollback by restoring the exact installer/updater plugin backup and restarting
+the same Gateway. Old versions restore the import risk. The upstream v0.21.0
+Responses adapter's historical function-name sanitization is a separate fix;
+this lifecycle patch does not rename tools or replace that adapter.
 
 ## QQ file-delivery hook (1.8.4)
 

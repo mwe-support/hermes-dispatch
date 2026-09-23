@@ -40,8 +40,8 @@ def patch_channel_directory_chat_type(QQAdapter):
     logger.info("qqbot-connect-hotfix: patched QQAdapter._guess_chat_type with channel directory lookup")
 
 
-def lookup_channel_directory_type(chat_id: str) -> str | None:
-    for path in channel_directory_paths():
+def lookup_channel_directory_type(chat_id: str, *, paths=None) -> str | None:
+    for path in channel_directory_paths() if paths is None else paths:
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
         except FileNotFoundError:
@@ -50,8 +50,13 @@ def lookup_channel_directory_type(chat_id: str) -> str | None:
             logger.debug("qqbot-connect-hotfix: could not read %s: %s", path, exc)
             continue
 
-        entries = ((data.get("platforms") or {}).get("qqbot") or [])
+        platforms = data.get("platforms") if isinstance(data, dict) else None
+        entries = platforms.get("qqbot") if isinstance(platforms, dict) else None
+        if not isinstance(entries, list):
+            continue
         for entry in entries:
+            if not isinstance(entry, dict):
+                continue
             if str(entry.get("id") or "") != chat_id:
                 continue
             entry_type = str(entry.get("type") or "").strip().lower()

@@ -27,11 +27,13 @@
   },
   "tests": [
     "plugins/codex-app-server-phase-hotfix/test_hotfix.py",
+    "plugins/codex-app-server-phase-hotfix/test_startup.py",
     "plugins/codex-app-server-phase-hotfix/test_model_controls.py",
     "plugins/codex-app-server-phase-hotfix/test_qq_delivery_hook.py",
     "plugins/qqbot-connect-hotfix/test_hotfix.py",
     "plugins/qqbot-connect-hotfix/test_file_delivery.py",
     "plugins/qqbot-connect-hotfix/test_startup.py",
+    "plugins/qqbot-connect-hotfix/test_cron_delivery.py",
     "plugins/qqbot-connect-hotfix/test_expired_reply.py",
     "plugins/qqbot-connect-hotfix/test_media_reply.py",
     "plugins/qqbot-connect-hotfix/test_group_roundtrip.py",

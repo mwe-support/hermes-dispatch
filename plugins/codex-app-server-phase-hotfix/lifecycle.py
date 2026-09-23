@@ -5,11 +5,14 @@ from __future__ import annotations
 import functools
 import inspect
 import logging
+import threading
 from collections.abc import Callable
 
 logger = logging.getLogger(__name__)
 
 _PATCH_MARKER = "_codex_app_server_lifecycle_hotfix_wrapped"
+_RUNTIME_MARKER = "_codex_lifecycle_runtime_wrapped"
+_PATCH_LOCK = threading.Lock()
 
 
 def _has_active_turn(session: object) -> bool:
@@ -64,10 +67,8 @@ def _upstream_closes_codex_session(release_clients: Callable) -> bool:
     return "_codex_session" in source and ".close()" in source
 
 
-def patch_codex_agent_soft_eviction() -> str:
-    """Patch AIAgent.release_clients once, or defer to an upstream fix."""
-    from run_agent import AIAgent
-
+def _patch_agent_class(AIAgent) -> str:
+    """Called only with an initialized class, before its first Codex session."""
     current = AIAgent.release_clients
     if getattr(current, _PATCH_MARKER, False):
         return "already patched"
@@ -75,3 +76,25 @@ def patch_codex_agent_soft_eviction() -> str:
         return "upstream already closes idle Codex sessions; skipped"
     AIAgent.release_clients = wrap_release_clients(current)
     return "idle Codex session soft-eviction patched"
+
+
+def patch_codex_agent_soft_eviction() -> str:
+    """Defer class patching until runtime entry; never import run_agent here."""
+    from agent import codex_runtime
+
+    original = codex_runtime.run_codex_app_server_turn
+    if getattr(original, _RUNTIME_MARKER, False):
+        return "already patched"
+
+    @functools.wraps(original)
+    def run(agent, *args, **kwargs):
+        # Plugin discovery may hold the registry lock while run_agent imports
+        # model_tools on another thread. At turn entry the class is complete,
+        # and no Codex session has been allocated yet (cron/CLI/Gateway alike).
+        with _PATCH_LOCK:
+            _patch_agent_class(type(agent))
+        return original(agent, *args, **kwargs)
+
+    setattr(run, _RUNTIME_MARKER, True)
+    codex_runtime.run_codex_app_server_turn = run
+    return "idle Codex session soft-eviction patched at first Codex turn"

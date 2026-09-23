@@ -1,0 +1,10 @@
+{
+  "YOUR_GROUP_CRON_JOB_ID": {
+    "chat_id": "YOUR_QQ_GROUP_OPENID",
+    "chat_type": "group"
+  },
+  "YOUR_PRIVATE_CRON_JOB_ID": {
+    "chat_id": "YOUR_QQ_USER_OPENID",
+    "chat_type": "c2c"
+  }
+}
