@@ -211,6 +211,30 @@ class UpdaterTests(unittest.TestCase):
             drift = ops.desired_state_drift("hermes", "default", Path("/tmp/missing"), manifest)
         self.assertEqual(drift, ["plugin:sample"])
 
+    def test_managed_config_passes_plain_scalars_to_hermes(self) -> None:
+        manifest = {
+            "config_set": {
+                "model.openai_runtime": "codex_app_server",
+                "compression.codex_app_server_auto": "native",
+                "display.streaming": True,
+            },
+            "env_set_if_missing": {},
+            "enable_plugins": [],
+            "enable_tools": [],
+        }
+        with patch.object(ops, "hermes_call") as hermes_call, patch.object(
+            ops, "apply_env_defaults"
+        ):
+            ops.apply_managed_settings("hermes", "default", Path("unused"), manifest)
+        for key, value in (
+            ("model.openai_runtime", "codex_app_server"),
+            ("compression.codex_app_server_auto", "native"),
+            ("display.streaming", "true"),
+        ):
+            hermes_call.assert_any_call(
+                "hermes", "default", "config", "set", "--force", key, value
+            )
+
     def test_dry_run_fetches_and_tests_without_installing(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)
