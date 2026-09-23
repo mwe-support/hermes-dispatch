@@ -53,6 +53,27 @@ docs/
   examples, and an optional QQBot target compatibility patch for MCP outbound
   dispatch.
 
+## One-command Update
+
+On a host with Hermes, Git, and Python already installed, update the default
+profile and all named profiles from the latest `main`:
+
+macOS/Linux:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/mwe-support/hermes-dispatch/main/scripts/update-hermes-dispatch-all.sh | bash
+```
+
+Windows PowerShell:
+
+```powershell
+irm https://raw.githubusercontent.com/mwe-support/hermes-dispatch/main/scripts/update-hermes-dispatch-all.ps1 | iex
+```
+
+The updater backs up changed files and may restart an idle Gateway. See
+[`docs/operations.md`](docs/operations.md#automatic-updates-on-macos-and-windows)
+for dry-run, verification, and rollback.
+
 ## Installation Shape
 
 Copy plugins into the target Hermes data directory:
