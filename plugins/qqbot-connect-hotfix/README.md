@@ -24,6 +24,28 @@ structured self-mention gating, emoji-only group mentions, reply `msg_id`
 handling, native C2C streaming, bounded input notifications, markdown fallback,
 and media caption compatibility.
 
+Version 1.8.26 resolves [Issue #10](https://github.com/mwe-support/hermes-dispatch/issues/10)
+for Windows group text. Hermes 0.20.5 keeps only the last inbound `msg_id`, and
+the Windows proactive-denial wrapper could reattach that cached ID after QQ had
+already rejected it as expired. The plugin now records the QQ event timestamp,
+permits ordinary proactive-to-passive retry only while the group anchor is
+younger than 295 seconds, and keeps an expired-reply fallback standalone for
+that send. A rejected anchor is removed from the cache only if it still
+matches; a newer inbound message is preserved. Text payload and keyboard are
+unchanged. The media caption retry remains separate and does not use a group
+passive fallback.
+
+QQ's [official message rules](https://bot.q.qq.com/wiki/develop/api-v2/server-inter/message/overview.html)
+give group passive replies five minutes. If the group disallows proactive
+messages after that window, the final answer can still fail delivery; the
+Gateway must report the proactive permission error rather than claim an agent
+timeout. This patch does not store an undelivered result for later retrieval.
+Enable by installing/enabling this persistent plugin and restarting the
+affected Gateway. Verify with `test_expired_reply.py`, `test_media_reply.py`,
+and a real group task that crosses the passive window; inspect Gateway logs
+for the standalone retry and final delivery result. Roll back using the
+installer's pre-update plugin backup and restart only the affected profile.
+
 Version 1.8.19 closes the remaining Issue #3 lifetime and failure-storm gaps.
 Transport timeouts and disconnect-style errors are ambiguous because QQ may
 have consumed a frame before the response was lost. The plugin now retains the
@@ -691,8 +713,9 @@ Compatibility contract:
 - QQ replies use the explicit inbound `reply_to` while it remains valid and do
   not reuse stale `_last_msg_id` values. If QQ explicitly rejects that anchor as
   expired, version 1.7.0 retries text or keyboard delivery once without the
-  reply relationship. Unrelated errors are returned unchanged. Media does not
-  use this fallback yet.
+  reply relationship. Version 1.8.26 prevents the Windows group proactive
+  wrapper from restoring the rejected anchor. Unrelated errors are returned
+  unchanged. Media does not use this fallback yet.
 - QQ may label a message that mentions another member as
   `GROUP_AT_MESSAGE_CREATE`. Version 1.5.2 and later check the authoritative
   `mentions[].is_you` field, so @owner/@member traffic is captured as context
