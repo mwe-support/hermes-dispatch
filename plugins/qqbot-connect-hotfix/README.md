@@ -1010,3 +1010,9 @@ Rollback with the installer's/updater's exact QQ plugin backup and restart.
 Removing a pin restores upstream routing only for platform-only jobs; explicit
 QQ jobs still use the directory/origin guard. Restore the old plugin to remove
 all runtime wrappers. This restores the previous home/type guessing risks.
+
+The combined candidate retains issue #10 protection: group passive fallback
+uses a timestamped inbound anchor within 295 seconds, never reattaches a known
+expired anchor during standalone fallback, and preserves newer inbound cache
+entries. This prevents deployment of the cron guard from removing the already
+installed reply-window fix. `test_expired_reply.py` covers the combined order.

@@ -73,3 +73,13 @@ passed on a clean snapshot of core `fcbd1076a93841fa88855acce810e342a5b78101`.
 The plugin install/backup/restore checks and `git diff --check` passed. These
 are isolated host tests with QQ HTTP replaced; this run did not deploy, send
 production messages or perform native Windows acceptance.
+
+## Two-host acceptance prerequisite
+
+The user requires both the local Hermes and the C-end operations Mac mini peer
+to pass before overall acceptance. Preflight found the local installed QQ plugin
+already contains issue #10 timestamp/standalone protection. The candidate now
+retains commits `fcde06c`/`8dc91c2` behavior rather than removing that live fix.
+Its outbound module matches the existing local runtime byte-for-byte; the
+new lifecycle and cron guards are tested on top of it. Host-specific results
+must include exact bundle hashes, startup checks, real delivery and cleanup.
