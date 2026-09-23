@@ -64,6 +64,33 @@ scripts/test_install_plugins.sh
 
 ## Automatic Updates on macOS and Windows
 
+### One-command update for every profile
+
+After this release reaches `main`, macOS/Linux operators can update the default
+profile and every named profile to one pinned latest-main commit with:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/mwe-support/hermes-dispatch/main/scripts/update-hermes-dispatch-all.sh | bash
+```
+
+The script fetches `main` once, discovers profiles below the native Hermes
+root, then invokes the existing profile-scoped updater sequentially with
+`--apply`. Each profile retains its own lock, state, backup, health check and
+rollback. Profiles with active agents are retried for up to one hour by
+default; override that bound with `--wait-active SECONDS`. Any blocked,
+deferred, or failed profile makes the command exit nonzero after the remaining
+profiles have been attempted. Preview the same pinned update without mutation:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/mwe-support/hermes-dispatch/main/scripts/update-hermes-dispatch-all.sh | bash -s -- --dry-run
+```
+
+Windows operators can run the same shell script from Git Bash. Native
+PowerShell scheduling remains handled by the updater's existing Scheduled Task
+adapter. Roll back an applied profile from its latest `update-backups` snapshot
+or remove the managed plugin directories/settings using the per-profile
+procedure below.
+
 `ops/hermes_dispatch_update.py` is a host-side updater, not a Gateway plugin.
 That separation is intentional: it can repair or roll back dispatch plugins
 when the Gateway is stopped or broken, and it never replaces code from inside
