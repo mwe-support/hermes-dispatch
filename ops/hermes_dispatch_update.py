@@ -607,8 +607,7 @@ def apply_managed_settings(
     manifest: dict[str, Any],
 ) -> None:
     for key, value in manifest["config_set"].items():
-        encoded = json.dumps(value, ensure_ascii=False)
-        hermes_call(hermes, profile, "config", "set", "--force", key, encoded)
+        hermes_call(hermes, profile, "config", "set", "--force", key, expected_config_text(value))
     apply_env_defaults(home / ".env", manifest["env_set_if_missing"])
     for plugin in manifest["enable_plugins"]:
         args = ["plugins", "enable", plugin]

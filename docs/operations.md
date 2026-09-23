@@ -172,6 +172,18 @@ WhatsApp state, unrelated hooks and all other local settings are outside the
 updater's Interface and remain untouched. It never upgrades Hermes or Codex;
 an incompatible commit is recorded as `blocked_by_hermes_version`.
 
+The updater passes plain scalar values to `hermes config set`. Hermes treats
+quote characters in string arguments literally; older updater builds
+JSON-encoded strings, which could save `model.openai_runtime` as
+`"codex_app_server"` instead of `codex_app_server` and disable the app-server
+runtime. Apply the fixed updater to each affected profile, then verify with
+`hermes -p <profile> config get model.openai_runtime` and
+`hermes -p <profile> config get compression.codex_app_server_auto`: the values
+must be `codex_app_server` and `native` without printed quote characters.
+If an update fails, restore that profile's `config.yaml` from its matching
+`update-backups/<commit>-<timestamp>` snapshot using the rollback procedure
+below.
+
 Before live mutation, every managed plugin is staged on the profile's own
 filesystem. Plugin roots, staging roots and backup roots must be real
 directories, not symlinks, junctions or Windows reparse points. All targets are
