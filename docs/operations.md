@@ -66,8 +66,8 @@ scripts/test_install_plugins.sh
 
 ### One-command update for every profile
 
-After this release reaches `main`, macOS/Linux operators can update the default
-profile and every named profile to one pinned latest-main commit with:
+macOS/Linux operators can update the default profile and every named profile
+from the latest `main` without choosing a branch or commit:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/mwe-support/hermes-dispatch/main/scripts/update-hermes-dispatch-all.sh | bash
@@ -85,9 +85,17 @@ profiles have been attempted. Preview the same pinned update without mutation:
 curl -fsSL https://raw.githubusercontent.com/mwe-support/hermes-dispatch/main/scripts/update-hermes-dispatch-all.sh | bash -s -- --dry-run
 ```
 
-Windows operators can run the same shell script from Git Bash. Native
-PowerShell scheduling remains handled by the updater's existing Scheduled Task
-adapter. Roll back an applied profile from its latest `update-backups` snapshot
+Windows PowerShell operators can run the native equivalent without Git Bash:
+
+```powershell
+irm https://raw.githubusercontent.com/mwe-support/hermes-dispatch/main/scripts/update-hermes-dispatch-all.ps1 | iex
+```
+
+For a PowerShell preview or custom wait, save the script locally and run it with
+`-DryRun` or `-WaitActiveSeconds SECONDS`. Both entrypoints fetch `main` by
+default and pin the fetched commit internally for that run, so every profile
+receives the same code. Native Scheduled Tasks remain owned by the underlying
+Python updater. Roll back an applied profile from its latest `update-backups` snapshot
 or remove the managed plugin directories/settings using the per-profile
 procedure below.
 
