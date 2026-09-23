@@ -16,6 +16,17 @@ group without proactive permission may still need a later user wakeup to
 retrieve the finished result. Verify using the plugin README and roll back
 from the pre-update plugin backup if needed.
 
+Native Windows acceptance installed the integrated 1.8.28 plugin on Hermes
+0.20.5 after five focused QQ regressions passed. The prior plugin was saved
+outside the discovery tree. A real group turn took 355.4 seconds from inbound
+to `response ready`, exceeding QQ's passive window. Gateway logs recorded
+three expired-anchor error entries, one standalone fallback, and a successful
+retry; the QQ client showed one final result bubble. No proactive-permission
+denial occurred in that live turn, so the denial branch remains covered by the
+combined regression rather than a live platform rejection. The replacement
+Gateway reached QQ Ready, config and `.env` hashes stayed unchanged, and the
+one-time restart task and helper were removed while the backup was retained.
+
 ## 2026-09-21 — Native Windows updater and plugin regression compatibility
 
 The first real Windows canary for the cross-platform dispatch updater exposed
