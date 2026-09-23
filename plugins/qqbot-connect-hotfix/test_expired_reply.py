@@ -239,6 +239,8 @@ async def main():
         raise AssertionError("expired fallback must stay standalone")
     assert [call[1] for call in newer.calls] == ["expired", None]
     assert newer._last_msg_id["group"] == "newer"
+    assert (await newer._send_group_text("group", "next status")).success
+    assert [call[1] for call in newer.calls] == ["expired", None, None, "newer"]
 
     for message in (
         "回复消息msg_id已过期",
