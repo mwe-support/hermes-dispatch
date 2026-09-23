@@ -1,5 +1,21 @@
 # Development Log
 
+## 2026-09-23 — Prevent stale QQ group reply reuse on Windows
+
+Issue #10 exposed an interaction between the existing expired-`msg_id`
+standalone retry and a Windows group proactive-denial fallback: a long turn
+could have its old inbound ID reattached after QQ rejected it, hiding the
+platform's proactive permission failure. A combined regression reproduced
+`expired → standalone denied → same expired anchor` before the fix. QQ hotfix
+1.8.28 now tracks the original group event time, allows ordinary passive
+fallback only within a 295-second margin, marks the expired-reply retry as
+standalone for that task, and conditionally clears only the rejected cached
+ID. Existing media caption retry is unchanged. The focused regression must
+show only `expired → standalone` with the proactive denial visible; a real
+group without proactive permission may still need a later user wakeup to
+retrieve the finished result. Verify using the plugin README and roll back
+from the pre-update plugin backup if needed.
+
 ## 2026-09-21 — Native Windows updater and plugin regression compatibility
 
 The first real Windows canary for the cross-platform dispatch updater exposed
@@ -51,7 +67,6 @@ extractor excludes `~` from drive-path segments. QQ hotfix 1.8.27 adds a
 drive-absolute, tilde-only fallback after example masking and reuses Hermes'
 media-path validator. No policy or UNC expansion is introduced. Verify with
 `test_file_delivery.py`; rollback to 1.8.26 removes the fallback.
-
 ## 2026-08-31 — Move accepted QQ steering to a new display segment
 
 Version 1.8.21 compensates for Hermes 0.20.5 preserving one cumulative native

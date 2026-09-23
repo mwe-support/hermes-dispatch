@@ -8,6 +8,7 @@ import inspect
 import logging
 import re
 import shlex
+import time
 from pathlib import Path
 from urllib.parse import quote, unquote, urlsplit
 from urllib.request import url2pathname
@@ -17,7 +18,52 @@ from typing import Any, Awaitable, Callable, Dict
 logger = logging.getLogger(__name__)
 
 _EXPIRED_REPLY_WRAPPER = "_qqbot_expired_reply_fallback_wrapped"
+_EXPIRED_REPLY_STANDALONE = contextvars.ContextVar("qq_expired_reply_standalone", default="")
 _POST_STREAM_DELIVERY = contextvars.ContextVar("qq_post_stream_delivery", default=None)
+_GROUP_REPLY_MAX_AGE = 295  # QQ's five-minute window, with a small send margin.
+
+
+def _forget_expired_group_anchor(adapter: Any, chat_id: str, anchor: object) -> None:
+    """Forget only the rejected anchor; a newer inbound message may have arrived."""
+    cached = getattr(adapter, "_last_msg_id", None)
+    if isinstance(cached, dict) and cached.get(chat_id) == anchor:
+        cached.pop(chat_id, None)
+    seen = getattr(adapter, "_qq_group_reply_seen", None)
+    if isinstance(seen, dict) and seen.get(chat_id, (None,))[0] == anchor:
+        seen.pop(chat_id, None)
+
+
+def patch_group_reply_timestamps(QQAdapter):
+    """Tie the native last-message cache to the inbound QQ event timestamp."""
+    original = QQAdapter.handle_message
+    if getattr(original, "_qq_group_reply_timestamps_wrapped", False):
+        return
+
+    @functools.wraps(original)
+    async def handle_message(self, event):
+        source = getattr(event, "source", None)
+        chat_id = getattr(source, "chat_id", None)
+        anchor = getattr(event, "message_id", None)
+        if getattr(source, "chat_type", None) == "group" and chat_id and anchor:
+            stamp = getattr(event, "timestamp", None)
+            if getattr(stamp, "tzinfo", None) is not None and stamp.utcoffset() is not None:
+                seen = getattr(self, "_qq_group_reply_seen", None)
+                if seen is None:
+                    seen = self._qq_group_reply_seen = {}
+                seen[chat_id] = (anchor, stamp.timestamp())
+        return await original(self, event)
+
+    handle_message._qq_group_reply_timestamps_wrapped = True
+    QQAdapter.handle_message = handle_message
+
+
+def _recent_group_reply_anchor(adapter: Any, chat_id: str) -> str:
+    seen = getattr(adapter, "_qq_group_reply_seen", {}) or {}
+    anchor, sent_at = seen.get(chat_id, (None, None))
+    if not anchor or getattr(adapter, "_last_msg_id", {}).get(chat_id) != anchor:
+        return ""
+    age = time.time() - sent_at
+    return str(anchor) if 0 <= age < _GROUP_REPLY_MAX_AGE else ""
 
 
 def is_expired_reply_error(error: object) -> bool:
@@ -44,8 +90,18 @@ async def _send_with_expired_reply_fallback(
     reply_to: object,
     log_tag: str,
     send_kind: str,
+    on_expired: Callable[[], None] | None = None,
 ):
     """Try the referenced send, then retry once without the expired anchor."""
+
+    async def standalone():
+        if on_expired is not None:
+            on_expired()
+        token = _EXPIRED_REPLY_STANDALONE.set(log_tag)
+        try:
+            return await send(None)
+        finally:
+            _EXPIRED_REPLY_STANDALONE.reset(token)
 
     try:
         result = await send(reply_to)
@@ -60,7 +116,7 @@ async def _send_with_expired_reply_fallback(
             exc,
         )
         try:
-            return await send(None)
+            return await standalone()
         except Exception as fallback_exc:
             raise RuntimeError(
                 "QQ standalone fallback failed after expired reply anchor; "
@@ -79,7 +135,7 @@ async def _send_with_expired_reply_fallback(
             log_tag,
             getattr(result, "error", ""),
         )
-        return await send(None)
+        return await standalone()
     return result
 
 
@@ -124,6 +180,10 @@ def patch_expired_reply_fallback(QQAdapter):
                     reply_to=reply_to,
                     log_tag=str(target_id),
                     send_kind=kind,
+                    on_expired=(
+                        lambda: _forget_expired_group_anchor(self, target_id, reply_to)
+                        if kind == "group text/keyboard" else None
+                    ),
                 )
 
             setattr(wrapped, _EXPIRED_REPLY_WRAPPER, True)
@@ -184,17 +244,28 @@ def patch_plain_text_retry(QQAdapter):
             raise
 
     async def _send_group_text(self, group_openid: str, content: str, reply_to=None, keyboard=None):
+        effective_reply_to = reply_to
         try:
             return await original_group(self, group_openid, content, reply_to, keyboard)
         except RuntimeError as exc:
-            if should_retry_plain_text(self, exc):
+            error = exc
+            if should_retry_group_as_passive_reply(self, exc, group_openid, reply_to):
+                effective_reply_to = _recent_group_reply_anchor(self, group_openid)
+                if effective_reply_to:
+                    try:
+                        return await original_group(self, group_openid, content, effective_reply_to, keyboard)
+                    except RuntimeError as retry_exc:
+                        if is_expired_reply_error(retry_exc):
+                            _forget_expired_group_anchor(self, group_openid, effective_reply_to)
+                        error = retry_exc
+            if should_retry_plain_text(self, error):
                 logger.warning(
                     "qqbot-connect-hotfix: markdown group send failed for %s; retrying plain text: %s",
                     group_openid,
-                    exc,
+                    error,
                 )
-                return await send_plain_text(self, "group", group_openid, content, reply_to, keyboard)
-            raise
+                return await send_plain_text(self, "group", group_openid, content, effective_reply_to, keyboard)
+            raise error
 
     _send_c2c_text.__name__ = getattr(original_c2c, "__name__", "_send_c2c_text")
     _send_c2c_text.__qualname__ = getattr(original_c2c, "__qualname__", "QQAdapter._send_c2c_text")
@@ -205,6 +276,15 @@ def patch_plain_text_retry(QQAdapter):
     QQAdapter._send_c2c_text = _send_c2c_text
     QQAdapter._send_group_text = _send_group_text
     logger.info("qqbot-connect-hotfix: patched QQAdapter text send with plain-text retry")
+
+
+def should_retry_group_as_passive_reply(self, exc: Exception, group_openid: str, reply_to) -> bool:
+    """Use a recent inbound group anchor only for an ordinary proactive denial."""
+    if reply_to or _EXPIRED_REPLY_STANDALONE.get() == group_openid:
+        return False
+    text = str(exc).lower()
+    denied = "主动消息失败" in text or "proactive message" in text or "无权限" in text
+    return denied and bool(_recent_group_reply_anchor(self, group_openid))
 
 
 def should_retry_plain_text(self, exc: Exception) -> bool:
