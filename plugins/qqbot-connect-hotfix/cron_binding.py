@@ -232,7 +232,17 @@ def patch_job_binding():
             origin = job.get('origin') or {}
             selected = binding_target(job)
             if selected is None and origin.get('platform') == 'qqbot':
+                if 'deliver' not in updates:
+                    return original_update(job_id, {**updates, 'origin': origin,
+                                                    'deliver': job.get('deliver', 'local')})
                 selected = target(origin.get('chat_id'), origin.get('chat_type'))
+                legacy_route = job.get('deliver', 'local')
+                if legacy_route not in {'qqbot', 'origin', 'qqbot:' + selected['chat_id']}:
+                    # A schedule/pause/name change cannot opt a local job into
+                    # delivery or silently retarget a legacy explicit route.
+                    request = _current_request()
+                    if not request or not request.get('requested'):
+                        raise ValueError('QQ cron binding: legacy route requires an explicit user delivery clause')
             if selected is None:
                 return original_update(job_id, updates)
             values = dict(updates)
@@ -267,7 +277,12 @@ def patch_codex_context():
 
     @functools.wraps(original_run)
     def run(agent, *args, **kwargs):
-        request = _current_request()
+        try:
+            request = _current_request()
+        except ValueError as exc:
+            # Routing policy belongs to cron mutation, not ordinary chat.
+            # Carry the error to child tools, where create/update will reject.
+            request = {'error': str(exc)}
         path = None
         if request:
             root = _home() / 'cron' / 'qq-context'

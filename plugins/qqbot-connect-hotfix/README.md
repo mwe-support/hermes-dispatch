@@ -936,7 +936,7 @@ example files uploaded. The exact four model replies each reproduce zero
 attachments through 1.8.24 and one through the fix. This is targeted delivery
 acceptance, not a claim about natural generation or unlimited input coverage.
 
-## Automatic QQ cron conversation binding (1.8.32)
+## Automatic QQ cron conversation binding (1.8.33)
 
 [Issue #12](https://github.com/mwe-support/hermes-dispatch/issues/12) requires a
 job created in a QQ group or private chat to keep that conversation as its
@@ -968,7 +968,8 @@ The name must be unique in this profile's `channel_directory.json`; QQ account
 numbers are not native bot-specific IDs. Quoted examples, code blocks, negative
 instructions and model-generated tool arguments are not authorization. An
 unknown, ambiguous or unclear delivery clause returns an error instead of
-silently choosing home or the source. Arbitrary prose is not interpreted by a
+silently choosing home or the source. These errors block only cron mutations,
+not ordinary chat or other tools. Arbitrary prose is not interpreted by a
 second model: the error requests an unambiguous delivery clause. No new job pin
 file is required for normal group/private scheduling.
 

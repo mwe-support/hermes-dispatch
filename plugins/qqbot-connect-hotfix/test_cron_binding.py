@@ -62,6 +62,8 @@ print(json.dumps(jobs.create_job(prompt='test', schedule='30m', deliver='qqbot')
         envs.append({**os.environ, **env, 'PATH': str(launchers) + os.pathsep + os.environ['PATH']})
 
     def runtime(agent, **kwargs):
+        if kwargs.get('no_tools'):
+            return {'reply': 'ordinary chat remains available'}
         if not getattr(agent, 'child_env', None):
             client = object.__new__(CodexAppServerClient)
             CodexAppServerClient.__init__(client)
@@ -200,6 +202,9 @@ print(json.dumps(jobs.create_job(prompt='test', schedule='30m', deliver='qqbot')
 
         with incoming(text='发送到：不存在的群'):
             must_reject(create)
+            ordinary = SimpleNamespace()
+            assert codex_runtime.run_codex_app_server_turn(ordinary, no_tools=True)['reply']
+            assert not ordinary._qq_cron_context_path.exists()
         with incoming(text='每天生成报告并发送到运营群'):
             must_reject(create)  # Must ask for a clear target, not silently use origin.
         with incoming(text='发送到：运营群\n发给：指定私聊'):
@@ -218,6 +223,20 @@ print(json.dumps(jobs.create_job(prompt='test', schedule='30m', deliver='qqbot')
         tampered = {**updated, 'deliver': 'qqbot:home-user'}
         must_reject(lambda: plugin.cron_delivery._pinned_target(tampered,
                                         scheduler._normalize_deliver_value))
+
+        for old_route in ('local', 'qqbot:other-group'):
+            legacy = jobs.create_job.__wrapped__(prompt='legacy', schedule='30m', deliver=old_route,
+                origin={'platform': 'qqbot', 'chat_id': 'source-group', 'chat_type': 'group'})
+            changed = jobs.update_job(legacy['id'], {'name': 'renamed', 'enabled': False, 'origin': None})
+            assert changed['deliver'] == old_route and changed['origin'] == legacy['origin']
+            assert binding.binding_target(changed) is None
+            must_reject(lambda: jobs.update_job(legacy['id'], {'deliver': 'qqbot'}))
+            with incoming(text='发送到：运营群'):
+                changed = jobs.update_job(legacy['id'], {'deliver': 'qqbot'})
+                assert binding.binding_target(changed)['chat_id'] == 'other-group'
+        local_legacy = jobs.create_job.__wrapped__(prompt='legacy local', schedule='30m', deliver='local',
+            origin={'platform': 'qqbot', 'chat_id': 'unknown-old-origin'})
+        assert jobs.update_job(local_legacy['id'], {'enabled': False})['deliver'] == 'local'
 
         def concurrent(n):
             with incoming(chat=f'concurrent-{n}', kind='group' if n % 2 else 'dm'):
