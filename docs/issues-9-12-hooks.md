@@ -33,27 +33,27 @@ The upstream replayed-tool-name fix in v0.21.0 remains a separate concern.
 
 The clarified requirement is automatic binding to the QQ conversation that
 creates the job, with another target allowed only by an explicit instruction
-in that user's original message. Version 1.8.31 captures native inbound context,
+in that user's original message. Version 1.8.32 captures native inbound context,
 atomically stores a typed target with the job, preserves it across updates and
 restarts, and enforces it for text/media/no-agent delivery. Codex child tools
 receive per-turn context; a process-local CLI bootstrap covers upstream cron
 commands that skip plugin discovery. Unknown or ambiguous destinations and
 missing origins fail closed, rather than selecting home.
 
-See the [QQ plugin README](../plugins/qqbot-connect-hotfix/README.md#automatic-qq-cron-conversation-binding-1831)
+See the [QQ plugin README](../plugins/qqbot-connect-hotfix/README.md#automatic-qq-cron-conversation-binding-1832)
 for the explicit delivery-clause format, supported entry points, legacy job
 audit, enablement, verification and rollback. The native Codex attachment hook
 and Hermes core source remain unchanged.
 
 The earlier 1.8.29 tests below passed only explicit-target/pin delivery. They do
-not establish acceptance of automatic source binding. Version 1.8.31 requires
+not establish acceptance of automatic source binding. Version 1.8.32 requires
 new real QQ-created jobs on both hosts before that broader claim can be made.
 
 ## Release integration
 
 This branch starts at updater commit `eefed8a`; it retains the existing Windows
 SQLite, hook installer and short-path compatibility changes. Versions are Codex
-plugin 1.8.7 and QQ plugin 1.8.31, avoiding confusion with the independently
+plugin 1.8.7 and QQ plugin 1.8.32, avoiding confusion with the independently
 validated older hook branch. Both new regressions are in `ops/release.json`
 (22 scripts total). No credentials, target IDs or business jobs are included.
 

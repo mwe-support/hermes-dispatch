@@ -1,5 +1,7 @@
 """Persist real cron jobs from inbound QQ turns, including Codex child tools."""
 import importlib.util
+import asyncio
+from contextvars import copy_context
 import json
 import os
 from pathlib import Path
@@ -117,9 +119,9 @@ print(json.dumps(jobs.create_job(prompt='test', schedule='30m', deliver='qqbot')
         ]}}))
 
         @contextmanager
-        def incoming(chat='source-group', kind='group', text='每天生成报告'):
+        def incoming(chat='source-group', kind='group', text='每天生成报告', missing_message_id=False):
             source = SimpleNamespace(platform='qqbot', chat_id=chat, chat_type=kind,
-                                     message_id='msg-' + chat)
+                                     message_id='' if missing_message_id else 'msg-' + chat)
             token = binding._REQUEST.set(None)
             binding.capture_request(event=SimpleNamespace(source=source, text=text))
             tokens = set_session_vars(platform='qqbot', chat_id=chat, chat_type=kind,
@@ -172,6 +174,29 @@ print(json.dumps(jobs.create_job(prompt='test', schedule='30m', deliver='qqbot')
                 assert job['deliver'] == 'qqbot:' + destination
                 assert job['origin']['chat_id'] == 'source-group'
                 must_reject(lambda: create(deliver='qqbot:unrequested'))
+
+        with incoming(text='发送到：运营群', missing_message_id=True):
+            assert create()['deliver'] == 'qqbot:other-group', 'QQ may omit the session message ID'
+
+        inherited = []
+        class Gateway:
+            async def _handle_message(self, event):
+                if not getattr(event, 'internal', False):
+                    binding.capture_request(event=event)
+                tokens = set_session_vars(platform='qqbot', chat_id='source-group',
+                                          chat_type='group', message_id='', cron_session='')
+                try:
+                    inherited.append(copy_context())
+                    return await asyncio.to_thread(create)
+                finally:
+                    clear_session_vars(tokens)
+        binding.patch_gateway_scope(Gateway)
+        event = SimpleNamespace(source=SimpleNamespace(platform='qqbot', chat_id='source-group',
+                                chat_type='group', message_id=''), text='发送到：运营群')
+        assert asyncio.run(Gateway()._handle_message(event))['deliver'] == 'qqbot:other-group'
+        must_reject(lambda: inherited[0].run(create))
+        event.internal = True
+        must_reject(lambda: asyncio.run(Gateway()._handle_message(event)))
 
         with incoming(text='发送到：不存在的群'):
             must_reject(create)

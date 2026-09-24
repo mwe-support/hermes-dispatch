@@ -936,7 +936,7 @@ example files uploaded. The exact four model replies each reproduce zero
 attachments through 1.8.24 and one through the fix. This is targeted delivery
 acceptance, not a claim about natural generation or unlimited input coverage.
 
-## Automatic QQ cron conversation binding (1.8.31)
+## Automatic QQ cron conversation binding (1.8.32)
 
 [Issue #12](https://github.com/mwe-support/hermes-dispatch/issues/12) requires a
 job created in a QQ group or private chat to keep that conversation as its
@@ -946,7 +946,11 @@ The removable plugin enforces this at job creation/update and actual delivery;
 Hermes source files are unchanged.
 
 The native Hermes `pre_gateway_dispatch` hook captures the inbound QQ source
-and original delivery instruction. `cron.jobs.create_job` persists the exact
+and original delivery instruction. A per-message Gateway scope expires that
+context on return (including copies inherited by background tasks); internal
+messages cannot borrow an earlier user request. QQ may omit the optional
+session message ID, so it is not used as the sole authorization gate.
+`cron.jobs.create_job` persists the exact
 ID/type and `_qq_delivery_binding` inside the job's `origin`, in the same atomic
 write as the job itself. The default applies even if the model supplies
 `qqbot`, `origin` or `local`. Model-supplied origin fields cannot replace the

@@ -16,6 +16,7 @@ from .channel_directory import lookup_channel_directory_type
 BINDING = '_qq_delivery_binding'
 CONTEXT_ENV = 'HERMES_QQ_CRON_CONTEXT'
 _REQUEST = contextvars.ContextVar('qq_cron_request', default=None)
+_MANAGED_TURN = contextvars.ContextVar('qq_cron_gateway_turn', default=False)
 _CHILD_CONTEXT = contextvars.ContextVar('qq_cron_child_context', default='')
 _MARKER = '_qq_cron_binding_wrapped'
 _VERBS = r'投递到|发送到|推送到|发到|发给|send to|deliver to'
@@ -91,7 +92,7 @@ def capture_request(*, event=None, **_):
         return
     try:
         origin = target(str(source.chat_id), str(source.chat_type))
-        request = {'source': origin, 'message_id': str(getattr(source, 'message_id', '')
+        request = {'active': True, 'source': origin, 'message_id': str(getattr(source, 'message_id', '')
                                                     or getattr(event, 'message_id', '') or '')}
         try:
             request['requested'] = _requested_target(getattr(event, 'text', ''), origin)
@@ -99,7 +100,30 @@ def capture_request(*, event=None, **_):
             request['error'] = str(exc)
         _REQUEST.set(request)
     except (ValueError, TypeError):
-        _REQUEST.set({'error': 'QQ cron binding: inbound conversation type is unavailable'})
+        _REQUEST.set({'active': True, 'error': 'QQ cron binding: inbound conversation type is unavailable'})
+
+
+def patch_gateway_scope(GatewayRunner):
+    original = GatewayRunner._handle_message
+    if getattr(original, _MARKER, False):
+        return
+
+    @functools.wraps(original)
+    async def handle(self, *args, **kwargs):
+        token = _REQUEST.set(None)
+        scope = _MANAGED_TURN.set(True)
+        try:
+            return await original(self, *args, **kwargs)
+        finally:
+            request = _REQUEST.get()
+            if request is not None:
+                # Copies inherited by background tasks also see expiration.
+                request['active'] = False
+            _REQUEST.reset(token)
+            _MANAGED_TURN.reset(scope)
+
+    setattr(handle, _MARKER, True)
+    GatewayRunner._handle_message = handle
 
 
 def _current_request():
@@ -129,10 +153,21 @@ def _current_request():
     source = target(get_session_env('HERMES_SESSION_CHAT_ID'),
                     get_session_env('HERMES_SESSION_CHAT_TYPE'))
     request = _REQUEST.get()
-    if request and request.get('source') == source:
+    if request is not None:
+        if not request.get('active'):
+            raise ValueError('QQ cron binding: original inbound request has expired')
+        if request.get('error'):
+            raise ValueError(request['error'])
+        if request.get('source') != source:
+            raise ValueError('QQ cron binding: inbound source context mismatch')
         message_id = get_session_env('HERMES_SESSION_MESSAGE_ID')
-        if message_id and request.get('message_id') == message_id:
-            return request
+        if message_id and request.get('message_id') and request['message_id'] != message_id:
+            raise ValueError('QQ cron binding: inbound message context mismatch')
+        # QQ may not populate SessionSource.message_id. The native per-message
+        # scope and its lifetime, not an optional ID, prove the source here.
+        return request
+    if _MANAGED_TURN.get():
+        raise ValueError('QQ cron binding: no original user request in this Gateway turn')
     # Missing original text can never authorize another destination.
     return {'source': source, 'requested': None}
 

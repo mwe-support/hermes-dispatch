@@ -103,6 +103,9 @@ def _defer_gateway_methods(QQAdapter):
 
 
 def _patch_gateway_methods(QQAdapter):
+    from gateway.run import GatewayRunner
+    from .cron_binding import patch_gateway_scope
+    patch_gateway_scope(GatewayRunner)
     _patch_post_stream_media_failures(QQAdapter)
     streaming_status = _patch_qq_c2c_streaming(QQAdapter)
     logger.info("qqbot-connect-hotfix: %s", streaming_status)
