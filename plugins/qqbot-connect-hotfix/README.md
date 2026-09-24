@@ -936,7 +936,7 @@ example files uploaded. The exact four model replies each reproduce zero
 attachments through 1.8.24 and one through the fix. This is targeted delivery
 acceptance, not a claim about natural generation or unlimited input coverage.
 
-## Automatic QQ cron conversation binding (1.8.30)
+## Automatic QQ cron conversation binding (1.8.31)
 
 [Issue #12](https://github.com/mwe-support/hermes-dispatch/issues/12) requires a
 job created in a QQ group or private chat to keep that conversation as its
@@ -976,9 +976,9 @@ reads fresh context on its next turn. A QQ-child-only `PYTHONPATH` bootstrap att
 `cron.jobs` finishes importing: upstream `hermes cron create` otherwise skips
 plugin discovery. This also covers absolute Python/CLI paths without requiring
 the model to remember an alternate command. Unrelated Python programs do not
-import Hermes, and any existing `sitecustomize` is preserved. This changes only
-the managed QQ child environment, not system executables, global Python startup
-or Codex config. Deliberately stripping that environment or editing jobs.json
+import Hermes, and any existing `sitecustomize` is preserved. The Python bootstrap is scoped to the managed QQ child environment; it does
+not change global Python startup or Codex config. A generated CLI launcher may
+need the conditional outer-shell Hook described below. Deliberately stripping that environment or editing jobs.json
 directly is outside the supported scheduling API; unbound platform-only QQ
 jobs are refused at delivery, never sent to home.
 
@@ -998,9 +998,24 @@ endpoint guessing. A QQ API receipt `id` must match the adapter's message ID.
 Failures, including missing receipts, reach `last_delivery_error` even if the
 script itself succeeded. QQ proactive-message permissions remain necessary.
 
-Enable with `scripts/install-plugins.sh <HERMES_HOME> qqbot-connect-hotfix`, then
-restart the idle Gateway. No Codex native-hook trust change or manual pin is
-needed. Use an orderly stop and actual port-bind readiness check for macOS API
+Enable with `scripts/install-plugins.sh <HERMES_HOME> qqbot-connect-hotfix`.
+For generated shell launchers that clear `PYTHONPATH`, also run:
+
+```sh
+python3 scripts/install-qq-cron-bootstrap.py --home "$HERMES_HOME" --launcher "$(command -v hermes)"
+```
+
+This installs a conditional block in the **outer generated shell launcher**,
+not Hermes source: only QQ children retain `HERMES_QQ_CRON_BOOTSTRAP`; ordinary
+calls still clear `PYTHONPATH`. It backs up the launcher under the profile's
+`plugin-backups`, preserves its mode, refuses different owners/core paths,
+and supports `--remove`. Native launchers without the clearing line need no
+change. A symlink or unsupported clearing launcher must be inspected rather
+than assuming the bootstrap is active. A PATH-only shim is insufficient when
+a login shell reorders PATH; real acceptance caught this on macOS.
+
+Restart the idle Gateway after installation. No Codex native-hook trust change
+or manual job pin is needed. Use an orderly stop and actual port-bind readiness check for macOS API
 restarts as described in [the issue notes](../../docs/issues-9-12-hooks.md).
 
 Run `test_cron_binding.py` and `test_cron_delivery.py` using Hermes' Python and
@@ -1014,8 +1029,10 @@ or pin injection; earlier explicit-target/pin acceptance is insufficient.
 Rollback using the exact plugin backup and restart the Gateway. New job records
 already contain explicit destinations, so keep their binding metadata and
 recipient unless the user changes the task. Do not delete metadata to restore
-home routing. Stopping the Gateway also retires its child bootstrap environment; no
-system executable was replaced. Removing the plugin removes the guard and
+home routing. Stopping the Gateway also retires its child bootstrap environment. To remove
+the outer launcher Hook, run the installer with `--remove` after confirming no
+other profile uses it; the original `unset PYTHONPATH` behavior is restored
+without overwriting unrelated launcher edits. Removing the plugin removes the guard and
 restores upstream behavior, including its prior type/fallback risks.
 
 The combined candidate retains issue #10 protection: group passive fallback

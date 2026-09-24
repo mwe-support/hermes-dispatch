@@ -4,6 +4,8 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import shutil
+import shlex
 import sys
 import tempfile
 from contextlib import contextmanager
@@ -32,6 +34,15 @@ def main(home):
     plugin = load_plugin()
     envs = []
     children = []
+    launchers = home / 'launcher-bin'
+    launchers.mkdir()
+    launcher = launchers / 'hermes'
+    original_launcher = ('#!/bin/sh\nunset PYTHONPATH\nunset PYTHONHOME\nexec '
+                         + shlex.quote(sys.executable) + ' '
+                         + shlex.quote(str(Path(jobs.__file__).resolve().parents[1] / 'hermes')) + ' "$@"\n')
+    launcher.write_text(original_launcher)
+    launcher.chmod(0o700)
+    installer = Path(__file__).resolve().parents[2] / 'scripts/install-qq-cron-bootstrap.py'
     child_code = '''
 import json
 from cron import jobs
@@ -46,7 +57,7 @@ print(json.dumps(jobs.create_job(prompt='test', schedule='30m', deliver='qqbot')
         return json.loads(result.stdout.splitlines()[-1])
 
     def client_init(self, *args, env=None, **kwargs):
-        envs.append({**os.environ, **env})
+        envs.append({**os.environ, **env, 'PATH': str(launchers) + os.pathsep + os.environ['PATH']})
 
     def runtime(agent, **kwargs):
         if not getattr(agent, 'child_env', None):
@@ -61,6 +72,18 @@ print(json.dumps(jobs.create_job(prompt='test', schedule='30m', deliver='qqbot')
         cli_job = [j for j in jobs.load_jobs() if j['prompt'] == 'cli-test'][-1]
         assert cli_job['deliver'] == created['deliver']
         assert binding.binding_target(cli_job) == binding.binding_target(created)
+        launcher = shutil.which('hermes', path=agent.child_env['PATH'])
+        assert Path(launcher).parent == launchers
+        installed = subprocess.run([sys.executable, str(installer), '--home', str(home), '--launcher', launcher],
+            capture_output=True, text=True, timeout=30)
+        assert installed.returncode == 0, installed.stderr
+        assert Path(launcher).stat().st_mode & 0o777 == 0o700
+        wrapped = subprocess.run([launcher, 'cron', 'create', '30m', 'launcher-test',
+                                  '--deliver', 'qqbot', '--repeat', '1'],
+            env=agent.child_env, text=True, capture_output=True, timeout=30)
+        assert wrapped.returncode == 0, wrapped.stdout + wrapped.stderr
+        launcher_job = [j for j in jobs.load_jobs() if j['prompt'] == 'launcher-test'][-1]
+        assert binding.binding_target(launcher_job) == binding.binding_target(created)
         custom = home / 'python-customization'
         custom.mkdir(exist_ok=True)
         (custom / 'sitecustomize.py').write_text("import os\nos.environ['QQ_BOOTSTRAP_CHAIN_TEST']='preserved'\n")
@@ -188,6 +211,11 @@ print(json.dumps(jobs.create_job(prompt='test', schedule='30m', deliver='qqbot')
         assert len(envs) == 1, 'test must reuse the persistent Codex child environment'
         assert not agent._qq_cron_context_path.exists()
         assert not list((home / 'cron' / 'qq-context').glob('*.json'))
+        removed = subprocess.run([sys.executable, str(installer), '--home', str(home),
+                                  '--launcher', str(launcher), '--remove'],
+            capture_output=True, text=True, timeout=30)
+        assert removed.returncode == 0, removed.stderr
+        assert launcher.read_text() == original_launcher
 
         # Native cron tool (not only low-level storage) sees the same binding.
         with incoming(chat='tool-private', kind='dm'):
