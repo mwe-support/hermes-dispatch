@@ -936,7 +936,7 @@ example files uploaded. The exact four model replies each reproduce zero
 attachments through 1.8.24 and one through the fix. This is targeted delivery
 acceptance, not a claim about natural generation or unlimited input coverage.
 
-## Automatic QQ cron conversation binding (1.8.33)
+## Automatic QQ cron conversation binding (1.8.34)
 
 [Issue #12](https://github.com/mwe-support/hermes-dispatch/issues/12) requires a
 job created in a QQ group or private chat to keep that conversation as its
@@ -996,6 +996,14 @@ or persisted binding. Legacy cross-conversation jobs without binding evidence
 must be explicitly retargeted from a QQ user turn before they can deliver.
 Audit those jobs before upgrading; do not invent an origin for an old job.
 Unbound `local` jobs and other platforms retain their behavior.
+
+QQ-auto-delivered jobs also own their output during execution. Extra QQ
+`send_message` calls (including a bare `qqbot` that would select home) are
+blocked; matching duplicate sends retain the upstream skip result. The agent
+must return its content for the scheduler to deliver. A task-local execution
+flag is propagated through the existing sanitized subprocess factories, so
+Codex/MCP children and `no_agent` scripts receive the same guard. No credentials
+are added. Foreground QQ messaging and other platforms are unchanged.
 
 Text, files and images use the same fixed target and original uploader. A live
 QQ adapter/Gateway loop is required; failed sends never fall back to standalone

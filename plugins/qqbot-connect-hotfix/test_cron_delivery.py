@@ -4,6 +4,7 @@ import base64
 import importlib.util
 import json
 import os
+import subprocess
 from pathlib import Path
 import sys
 import tempfile
@@ -104,6 +105,44 @@ async def check_route(plugin, chat_type):
             assert await send(origin_job) is None
             assert [path for path, _ in adapter.calls] == [message_path], adapter.calls
             adapter.calls.clear()
+
+            # A model's extra send_message('qqbot') must not use home during
+            # execution. Foreground QQ and non-QQ tools retain their behavior.
+            from tools import send_message_tool
+            token = plugin.cron_delivery._EXECUTION.set(True)
+            try:
+                rejected = await send_message_tool._send_to_platform(Platform.QQBOT, None, 'home-user', 'extra')
+                assert not rejected['success'] and 'automatic' in rejected['error']
+                skipped = send_message_tool._maybe_skip_cron_duplicate_send('qqbot', 'home-user', None)
+                assert not skipped['success'] and 'automatic' in skipped['error']
+                from agent.transports import codex_app_server
+                env = codex_app_server.hermes_subprocess_env(inherit_credentials=True)
+                assert env[plugin.cron_delivery.AUTO_ENV] == '1'
+                probe = subprocess.run([sys.executable, '-c', '''import asyncio
+from unittest.mock import patch
+from gateway.config import Platform
+from tools import send_message_tool
+with patch('socket.socket.connect', side_effect=AssertionError('network forbidden')):
+    result = asyncio.run(send_message_tool._send_to_platform(Platform.QQBOT, None, 'synthetic', 'extra'))
+assert not result['success'] and 'automatic' in result['error'], result
+'''], env=env, capture_output=True, text=True, timeout=30)
+                assert probe.returncode == 0, probe.stderr
+            finally:
+                plugin.cron_delivery._EXECUTION.reset(token)
+            ordinary_calls = []
+            async def ordinary_send(*args, **kwargs):
+                ordinary_calls.append(args)
+                return {'success': True}
+            fake = SimpleNamespace(_send_to_platform=ordinary_send)
+            plugin.cron_delivery.patch_cron_send_message(fake)
+            token = plugin.cron_delivery._EXECUTION.set(True)
+            try:
+                assert not (await fake._send_to_platform(Platform.QQBOT, None, 'any', 'extra'))['success']
+                assert (await fake._send_to_platform(Platform.TELEGRAM, None, 'any', 'normal'))['success']
+            finally:
+                plugin.cron_delivery._EXECUTION.reset(token)
+            assert (await fake._send_to_platform(Platform.QQBOT, None, 'any', 'normal'))['success']
+            assert len(ordinary_calls) == 2
             directory = home / 'channel_directory.json'
             directory.write_text(json.dumps({'platforms': {'qqbot': [
                 {'id': target, 'name': 'native-target', 'type': chat_type}]}}))
@@ -179,7 +218,16 @@ async def check_route(plugin, chat_type):
             import builtins
             script = home / 'scripts' / 'cron-hook-probe.py'
             script.parent.mkdir(exist_ok=True)
-            script.write_text("print('no-agent route probe')\n")
+            script.write_text('''import asyncio, sys
+from unittest.mock import patch
+from gateway.config import Platform
+from tools import send_message_tool
+with patch('socket.socket.connect', side_effect=AssertionError('network forbidden in probe')):
+    result = asyncio.run(send_message_tool._send_to_platform(Platform.QQBOT, None, 'synthetic', 'extra'))
+assert not result['success'] and 'automatic' in result['error'], result
+assert 'run_agent' not in sys.modules
+print('no-agent route probe; manual QQ send blocked')
+''')
             scripted = create_job(prompt=None, schedule='0 * * * *', deliver='qqbot',
                                   script=script.name, no_agent=True)
             routes.write_text(json.dumps({scripted['id']: pin}))

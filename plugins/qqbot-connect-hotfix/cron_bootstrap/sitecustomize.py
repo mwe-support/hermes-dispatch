@@ -14,28 +14,40 @@ _qq_plugin_root = Path(__file__).resolve().parents[1]
 
 
 class _QQCronImports:
+    def __init__(self):
+        self.loaded = set()
+
     def find_spec(self, fullname, path=None, target=None):
-        if fullname != 'cron.jobs':
+        if fullname not in {'cron.jobs', 'tools.send_message_tool'}:
             return None
         spec = PathFinder.find_spec(fullname, path)
         if spec is None or spec.loader is None:
+            return None
+        core = os.environ.get('HERMES_QQ_CRON_CORE')
+        if core and Path(spec.origin).resolve() != (Path(core) / (fullname.replace('.', '/') + '.py')).resolve():
             return None
         original = spec.loader.exec_module
 
         def execute(module):
             original(module)
-            sys.meta_path.remove(self)
-            package = ModuleType('_qq_cron_bootstrap')
-            package.__path__ = [str(_qq_plugin_root)]
-            sys.modules[package.__name__] = package
-            binding = importlib.import_module(package.__name__ + '.cron_binding')
-            binding.patch_job_binding()
+            self.loaded.add(fullname)
+            if len(self.loaded) == 2:
+                sys.meta_path.remove(self)
+            name = '_qq_cron_bootstrap'
+            if name not in sys.modules:
+                package = ModuleType(name)
+                package.__path__ = [str(_qq_plugin_root)]
+                sys.modules[name] = package
+            if fullname == 'cron.jobs':
+                importlib.import_module(name + '.cron_binding').patch_job_binding()
+            else:
+                importlib.import_module(name + '.cron_delivery').patch_cron_send_message(module)
 
         spec.loader.exec_module = execute
         return spec
 
 
-if os.environ.get('HERMES_QQ_CRON_CONTEXT'):
+if os.environ.get('HERMES_QQ_CRON_CONTEXT') or os.environ.get('HERMES_QQ_CRON_AUTO_DELIVERY') == '1':
     sys.meta_path.insert(0, _QQCronImports())
 
 # Preserve a pre-existing sitecustomize rather than shadowing its behavior.

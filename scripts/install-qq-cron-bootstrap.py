@@ -9,13 +9,16 @@ import tempfile
 
 BEGIN = '# BEGIN hermes-dispatch QQ cron bootstrap'
 END = '# END hermes-dispatch QQ cron bootstrap'
-BLOCK = '''# BEGIN hermes-dispatch QQ cron bootstrap
+OLD_BLOCK = '''# BEGIN hermes-dispatch QQ cron bootstrap
 if [ -n "${HERMES_QQ_CRON_CONTEXT:-}" ] && [ -n "${HERMES_QQ_CRON_BOOTSTRAP:-}" ]; then
     export PYTHONPATH="$HERMES_QQ_CRON_BOOTSTRAP"
 else
     unset PYTHONPATH
 fi
 # END hermes-dispatch QQ cron bootstrap'''
+BLOCK = OLD_BLOCK.replace(
+    '[ -n "${HERMES_QQ_CRON_CONTEXT:-}" ] &&',
+    '{ [ -n "${HERMES_QQ_CRON_CONTEXT:-}" ] || [ "${HERMES_QQ_CRON_AUTO_DELIVERY:-}" = "1" ]; } &&')
 
 
 def install(launcher, home, remove=False):
@@ -30,11 +33,12 @@ def install(launcher, home, remove=False):
     if hasattr(os, 'getuid') and path.stat().st_uid != os.getuid():
         raise ValueError('launcher must be modified by its owning user')
     if BEGIN in text:
-        if text.count(BLOCK) != 1:
+        existing = BLOCK if text.count(BLOCK) == 1 else OLD_BLOCK
+        if text.count(existing) != 1:
             raise ValueError('existing QQ bootstrap block was modified; refusing overwrite')
-        if not remove:
+        if not remove and existing == BLOCK:
             return 'already installed'
-        updated = text.replace(BLOCK, 'unset PYTHONPATH')
+        updated = text.replace(existing, 'unset PYTHONPATH' if remove else BLOCK)
     else:
         if remove:
             return 'already absent'

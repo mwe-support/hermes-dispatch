@@ -5,7 +5,10 @@ import contextvars
 import functools
 import json
 import logging
+import os
+from pathlib import Path
 import re
+import sys
 
 from .channel_directory import lookup_channel_directory_type
 from .cron_binding import binding_target, target as source_target
@@ -13,6 +16,87 @@ from .cron_binding import binding_target, target as source_target
 _TARGET = contextvars.ContextVar('qq_cron_delivery_target', default=None)
 _MARKER = '_qq_cron_delivery_guard_wrapped'
 logger = logging.getLogger(__name__)
+_EXECUTION = contextvars.ContextVar('qq_cron_execution', default=False)
+AUTO_ENV = 'HERMES_QQ_CRON_AUTO_DELIVERY'
+_SEND_MARKER = '_qq_cron_manual_send_wrapped'
+
+
+def _owns_qq_delivery():
+    return _EXECUTION.get() or os.environ.get(AUTO_ENV) == '1'
+
+
+def patch_cron_send_message(module):
+    """Only the scheduler may send a QQ-auto-delivered job's output."""
+    original = module._send_to_platform
+    if getattr(original, _SEND_MARKER, False):
+        return
+    refusal = {'success': False, 'error': 'QQ cron delivery is automatic; extra QQ send_message '
+               'is blocked. Put the intended content in the final response.'}
+
+    @functools.wraps(original)
+    async def send(platform, *args, **kwargs):
+        if _owns_qq_delivery() and getattr(platform, 'value', platform) == 'qqbot':
+            return dict(refusal)
+        return await original(platform, *args, **kwargs)
+
+    setattr(send, _SEND_MARKER, True)
+    module._send_to_platform = send
+    original_skip = getattr(module, '_maybe_skip_cron_duplicate_send', None)
+    if original_skip is not None:
+        @functools.wraps(original_skip)
+        def skip(platform_name, *args, **kwargs):
+            result = original_skip(platform_name, *args, **kwargs)
+            if _owns_qq_delivery() and platform_name == 'qqbot':
+                return result or dict(refusal)
+            return result
+        module._maybe_skip_cron_duplicate_send = skip
+
+
+def _patch_execution_scope(scheduler):
+    from tools.environments import local
+    original_run = scheduler.run_job
+    marker = '_qq_cron_execution_wrapped'
+    if getattr(original_run, marker, False):
+        return
+
+    @functools.wraps(original_run)
+    def run(job, *args, **kwargs):
+        origin = job.get('origin') or {}
+        deliver = scheduler._normalize_deliver_value(job.get('deliver', 'local')).strip()
+        qq = bool(binding_target(job)) or (deliver != 'local' and (
+            origin.get('platform') == 'qqbot' or any(
+                part.strip().split(':', 1)[0].lower() == 'qqbot' for part in deliver.split(','))))
+        token = _EXECUTION.set(qq or _EXECUTION.get())
+        try:
+            return original_run(job, *args, **kwargs)
+        finally:
+            _EXECUTION.reset(token)
+
+    def environment(original):
+        @functools.wraps(original)
+        def build(*args, **kwargs):
+            env = original(*args, **kwargs)  # Retain upstream credential scrubbing.
+            if _owns_qq_delivery():
+                from cron import jobs
+                bootstrap = str(Path(__file__).parent / 'cron_bootstrap')
+                core = str(Path(jobs.__file__).resolve().parents[1])
+                env.update({AUTO_ENV: '1', 'HERMES_QQ_CRON_BOOTSTRAP': bootstrap,
+                            'HERMES_QQ_CRON_CORE': core})
+                env['PYTHONPATH'] = os.pathsep.join([bootstrap, core, env.get('PYTHONPATH', '')])
+            return env
+        return build
+
+    setattr(run, marker, True)
+    replacements = [(original_run, run)] + [
+        (getattr(local, name), environment(getattr(local, name)))
+        for name in ('build_subprocess_env', 'hermes_subprocess_env')]
+    for name, module in list(sys.modules.items()):
+        if module is None or name.split('.')[0] not in {'cron', 'tools', 'agent', 'gateway', 'hermes_cli'}:
+            continue
+        for attr, value in list(vars(module).items()):
+            for before, after in replacements:
+                if value is before:
+                    setattr(module, attr, after)
 
 
 def _pinned_target(job, normalize):
@@ -85,6 +169,9 @@ def patch_cron_delivery(QQAdapter):
     from gateway.config import Platform
     from gateway.platforms.base import SendResult
     from tools import send_message_tool
+
+    patch_cron_send_message(send_message_tool)
+    _patch_execution_scope(scheduler)
 
     if getattr(scheduler._deliver_result, _MARKER, False):
         return

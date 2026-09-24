@@ -309,6 +309,7 @@ def patch_codex_context():
         if _CHILD_CONTEXT.get():
             from cron import jobs
             core = str(Path(jobs.__file__).resolve().parents[1])
+            child_env['HERMES_QQ_CRON_CORE'] = core
             child_env['HERMES_QQ_CRON_BOOTSTRAP'] = str(Path(__file__).parent / 'cron_bootstrap')
             child_env['PYTHONPATH'] = os.pathsep.join([
                 child_env['HERMES_QQ_CRON_BOOTSTRAP'], core,
