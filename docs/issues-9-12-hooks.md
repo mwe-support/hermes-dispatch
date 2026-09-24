@@ -122,3 +122,30 @@ were disabled; temporary pins were removed, business jobs were preserved, and
 temporary launchd helper plists were archived outside the auto-start directory.
 This is candidate acceptance on two macOS hosts, not native Windows acceptance
 or a merge/release authorization.
+
+### Automatic binding acceptance (2026-09-24, 1.8.34)
+
+Implementation `0e76904` passed the clarified requirement on both the local
+development bot and the operations Mac mini. Jobs were created by real QQ group
+and private messages without manual origin/pin injection. Defaults returned to
+the creating conversation; explicit user destinations overrode it; the next
+default task did not retain the override. Unauthorized target arguments were
+rejected before creation. Native script and Codex-agent cron probes verified
+that extra QQ sends are blocked before network access while automatic delivery
+still reaches the bound target. Ordinary chat remained available.
+
+Both hosts passed 22 regression scripts. Eight downloaded TXT/PNG artifacts
+matched their sources; local final-version text/execution probes additionally
+verified the later guard changes. Both core/configuration hash baselines and
+existing business job configurations were preserved. Successful test jobs are
+completed/disabled, failed local canaries are paused, temporary aliases/helpers
+were cleaned up, and the temporary transfer server was stopped.
+
+The operations directory refreshed a temporary friendly alias, so that attempt
+correctly failed closed. Final cross-conversation acceptance used an exact
+verified native ID supplied in the original private message and arrived in the
+requested group. An independent CLI attempt with a DNS delivery error was not
+counted as successful; the accepted replacement fired naturally in Gateway.
+The outer generated launcher Hook is backed up and removable; Hermes core and
+the native Codex attachment Hook were not edited. This remains macOS runtime
+acceptance, not native Windows acceptance or authorization to publish/merge.
