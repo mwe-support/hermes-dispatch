@@ -34,6 +34,7 @@
     "plugins/qqbot-connect-hotfix/test_file_delivery.py",
     "plugins/qqbot-connect-hotfix/test_startup.py",
     "plugins/qqbot-connect-hotfix/test_cron_delivery.py",
+    "plugins/qqbot-connect-hotfix/test_cron_binding.py",
     "plugins/qqbot-connect-hotfix/test_expired_reply.py",
     "plugins/qqbot-connect-hotfix/test_media_reply.py",
     "plugins/qqbot-connect-hotfix/test_group_roundtrip.py",

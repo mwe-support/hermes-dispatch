@@ -31,34 +31,38 @@ The upstream replayed-tool-name fix in v0.21.0 remains a separate concern.
 
 ## #12
 
-Explicit single QQ targets are guarded by default using profile-local durable
-type data. Unknown type fails closed. Optional per-job pins override legacy
-home/origin defaults and support both group and private QQ. A conflicting
-explicit target fails before sending. The same guard covers files/images and
-checks the actual API receipt; failure propagates to `last_delivery_error`.
-No fallback can silently send to another conversation. QQ proactive permissions
-are still required and cannot be granted by this code.
+The clarified requirement is automatic binding to the QQ conversation that
+creates the job, with another target allowed only by an explicit instruction
+in that user's original message. Version 1.8.30 captures native inbound context,
+atomically stores a typed target with the job, preserves it across updates and
+restarts, and enforces it for text/media/no-agent delivery. Codex child tools
+receive per-turn context; a process-local CLI bootstrap covers upstream cron
+commands that skip plugin discovery. Unknown or ambiguous destinations and
+missing origins fail closed, rather than selecting home.
 
-The repeatable test traverses the real scheduler/router/adapter, with QQ HTTP
-replaced. It separately executes a real no-agent script while forbidding model
-runtime import. Installation, configuration, verification and rollback are in
-the [Codex plugin README](../plugins/codex-app-server-phase-hotfix/README.md#cold-start-lifecycle-registration-187)
-and [QQ plugin README](../plugins/qqbot-connect-hotfix/README.md#cron-routing-guard-1829).
+See the [QQ plugin README](../plugins/qqbot-connect-hotfix/README.md#automatic-qq-cron-conversation-binding-1830)
+for the explicit delivery-clause format, supported entry points, legacy job
+audit, enablement, verification and rollback. The native Codex attachment hook
+and Hermes core source remain unchanged.
+
+The earlier 1.8.29 tests below passed only explicit-target/pin delivery. They do
+not establish acceptance of automatic source binding. Version 1.8.30 requires
+new real QQ-created jobs on both hosts before that broader claim can be made.
 
 ## Release integration
 
 This branch starts at updater commit `eefed8a`; it retains the existing Windows
 SQLite, hook installer and short-path compatibility changes. Versions are Codex
-plugin 1.8.7 and QQ plugin 1.8.29, avoiding confusion with the independently
+plugin 1.8.7 and QQ plugin 1.8.30, avoiding confusion with the independently
 validated older hook branch. Both new regressions are in `ops/release.json`
-(21 scripts total). No credentials, target IDs or business jobs are included.
+(22 scripts total). No credentials, target IDs or business jobs are included.
 
 Earlier local live QQ results belong to the earlier pinned-hook implementation.
 They are useful prior evidence, not native Windows or production acceptance of
 this combined branch. This change does not resolve Windows ACL issue #11 or
 replace the separate issue #10 branch.
 
-## Verification of this combined branch
+## Historical isolated verification of the 1.8.29 candidate
 
 On official v0.21.0 / `v2026.8.31` (`29112bef099274229cadff79cdff7bf7b99c4b77`),
 all 21 release-manifest scripts passed. The cold-start test first failed with
@@ -83,3 +87,38 @@ retains commits `fcde06c`/`8dc91c2` behavior rather than removing that live fix.
 Its outbound module matches the existing local runtime byte-for-byte; the
 new lifecycle and cron guards are tested on top of it. Host-specific results
 must include exact bundle hashes, startup checks, real delivery and cleanup.
+
+### macOS restart prerequisite
+
+The operations peer's upstream API adapter uses `reuse_address=False` on
+macOS. After stopping Gateway, an empty `lsof ... LISTEN` result does not prove
+the port can be rebound: closed connections can still cause `EADDRINUSE`.
+The adapter treats that error as non-retryable, so QQ may reconnect while the
+peer API stays unavailable. This occurred during the September 24 acceptance
+attempt and caused the candidate to roll back; it is not a passing acceptance.
+
+For a supervised update, use an independent one-shot helper to stop the exact
+Gateway service and wait for its tracked processes to exit. Before bootstrap,
+also require a short-lived socket to bind the configured API address with
+`SO_REUSEADDR` disabled, closing the probe immediately. Bound the wait and do
+not terminate unrelated port owners. Use the same guard during rollback to
+the saved plugin directories. Verify authenticated API health, QQ delivery and
+unchanged core/configuration hashes afterward. This changes only the update
+procedure; no Hermes source or socket security setting is changed.
+
+### Historical explicit-target/pin result (2026-09-24, 1.8.29)
+
+Candidate `31ade1f` passed real QQ acceptance on the local development bot and
+the operations Mac mini peer. Local group/private results from September 23
+remain valid: all 35 installed plugin Python files still match the candidate.
+The peer passed explicit group and C2C delivery without pins, legacy `qqbot`
+delivery with a `dm` pin, and conflicting-target rejection. Both hosts completed
+real post-update agent replies. All ten downloaded TXT/PNG artifacts matched
+their source SHA-256 hashes. Each host's prior 21-script regression gate passed.
+
+The peer's 10,164 tracked core files and four protected configuration/hook files
+retained their hashes. All nine finite test jobs across both hosts completed and
+were disabled; temporary pins were removed, business jobs were preserved, and
+temporary launchd helper plists were archived outside the auto-start directory.
+This is candidate acceptance on two macOS hosts, not native Windows acceptance
+or a merge/release authorization.

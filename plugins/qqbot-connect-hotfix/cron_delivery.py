@@ -8,6 +8,7 @@ import logging
 import re
 
 from .channel_directory import lookup_channel_directory_type
+from .cron_binding import binding_target, target as source_target
 
 _TARGET = contextvars.ContextVar('qq_cron_delivery_target', default=None)
 _MARKER = '_qq_cron_delivery_guard_wrapped'
@@ -18,7 +19,8 @@ def _pinned_target(job, normalize):
     from hermes_constants import get_hermes_home
 
     deliver = normalize(job.get('deliver', 'local')).strip()
-    if deliver == 'local':
+    bound = binding_target(job)
+    if deliver == 'local' and bound is None:
         return None
     path = get_hermes_home() / 'cron' / 'delivery-targets.json'
     try:
@@ -32,7 +34,20 @@ def _pinned_target(job, normalize):
         raise ValueError('explicit QQ multi-target delivery is unsupported; use separate jobs')
     if deliver.split(':', 1)[0].lower() == 'qqbot':
         deliver = 'qqbot' + deliver[len('qqbot'):]
-    if job.get('id') in pins:
+    origin = job.get('origin') or {}
+    if bound is None and isinstance(origin, dict) and origin.get('platform') == 'qqbot':
+        # Legacy QQ jobs also use their durable origin, never the current home.
+        bound = source_target(origin.get('chat_id'), origin.get('chat_type'))
+    if bound is not None:
+        pin = bound
+        configured = pins.get(job.get('id'))
+        if configured is not None and (
+            not isinstance(configured, dict)
+            or set(configured) != {'chat_id', 'chat_type'}
+            or source_target(configured.get('chat_id'), configured.get('chat_type')) != bound
+        ):
+            raise ValueError('QQ delivery pin conflicts with the persisted conversation binding')
+    elif job.get('id') in pins:
         pin = pins[job['id']]
     elif deliver.startswith('qqbot:'):
         chat_id = deliver.split(':', 1)[1]
@@ -46,6 +61,8 @@ def _pinned_target(job, normalize):
         if not chat_type:
             raise ValueError('explicit QQ target has no durable chat type; configure delivery-targets.json')
         pin = {'chat_id': chat_id, 'chat_type': chat_type}
+    elif deliver in {'qqbot', 'origin'} and (deliver == 'qqbot' or origin.get('platform') == 'qqbot'):
+        raise ValueError('QQ cron delivery has no confirmed origin; refusing home fallback')
     else:
         return None
     if not isinstance(pin, dict) or set(pin) != {'chat_id', 'chat_type'}:

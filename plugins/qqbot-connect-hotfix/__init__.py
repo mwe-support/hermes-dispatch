@@ -61,6 +61,9 @@ def register(ctx):
         logger.warning("qqbot-connect-hotfix: could not import QQAdapter: %s", exc)
         return
 
+    from .cron_binding import register_binding
+    register_binding(ctx)
+
     _patch_connect_signature(QQAdapter)
     _patch_group_config_interactions(QQAdapter)
     _patch_channel_directory_chat_type(QQAdapter)

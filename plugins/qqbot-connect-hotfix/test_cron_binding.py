@@ -1,0 +1,205 @@
+"""Persist real cron jobs from inbound QQ turns, including Codex child tools."""
+import importlib.util
+import json
+import os
+from pathlib import Path
+import subprocess
+import sys
+import tempfile
+from contextlib import contextmanager
+from concurrent.futures import ThreadPoolExecutor
+from types import SimpleNamespace
+from unittest.mock import patch
+
+
+def load_plugin():
+    path = Path(__file__).with_name('__init__.py')
+    spec = importlib.util.spec_from_file_location('qq_binding_test', path,
+                                                 submodule_search_locations=[str(path.parent)])
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def main(home):
+    from cron import jobs, scheduler
+    from gateway.session_context import set_session_vars, clear_session_vars
+    from tools import cronjob_tools  # Alias exists before plugin discovery.
+    from agent import codex_runtime
+    from agent.transports.codex_app_server import CodexAppServerClient
+
+    plugin = load_plugin()
+    envs = []
+    children = []
+    child_code = '''
+import json
+from cron import jobs
+print(json.dumps(jobs.create_job(prompt='test', schedule='30m', deliver='qqbot')))
+'''
+
+    def child(env):
+        result = subprocess.run([sys.executable, '-c', child_code], env=env,
+            cwd=Path(__file__).parent, text=True, capture_output=True, timeout=30)
+        if result.returncode:
+            raise RuntimeError(result.stderr)
+        return json.loads(result.stdout.splitlines()[-1])
+
+    def client_init(self, *args, env=None, **kwargs):
+        envs.append({**os.environ, **env})
+
+    def runtime(agent, **kwargs):
+        if not getattr(agent, 'child_env', None):
+            client = object.__new__(CodexAppServerClient)
+            CodexAppServerClient.__init__(client)
+            agent.child_env = envs[-1]
+        created = child(agent.child_env)
+        result = subprocess.run([sys.executable, '-m', 'hermes_cli.main', 'cron', 'create',
+                                 '30m', 'cli-test', '--deliver', 'qqbot', '--repeat', '1'],
+            env=agent.child_env, text=True, capture_output=True, timeout=30)
+        assert result.returncode == 0, result.stdout + result.stderr
+        cli_job = [j for j in jobs.load_jobs() if j['prompt'] == 'cli-test'][-1]
+        assert cli_job['deliver'] == created['deliver']
+        assert binding.binding_target(cli_job) == binding.binding_target(created)
+        custom = home / 'python-customization'
+        custom.mkdir(exist_ok=True)
+        (custom / 'sitecustomize.py').write_text("import os\nos.environ['QQ_BOOTSTRAP_CHAIN_TEST']='preserved'\n")
+        probe = subprocess.run([sys.executable, '-c',
+            "import sys,os; assert 'cron.jobs' not in sys.modules; "
+            "assert os.environ['QQ_BOOTSTRAP_CHAIN_TEST']=='preserved'"],
+            env={**agent.child_env, 'PYTHONPATH': agent.child_env['PYTHONPATH'] + os.pathsep + str(custom)},
+            capture_output=True, text=True, timeout=30)
+        assert probe.returncode == 0, probe.stderr
+        other = home / 'other-profile'
+        other.mkdir(exist_ok=True)
+        try:
+            child({**agent.child_env, 'HERMES_HOME': str(other)})
+        except RuntimeError as exc:
+            assert 'invalid profile context path' in str(exc)
+        else:
+            raise AssertionError('another profile consumed the QQ context')
+        assert not (other / 'cron/jobs.json').exists()
+        children.append(created)
+        return created
+
+    with patch.object(codex_runtime, 'run_codex_app_server_turn', runtime), \
+         patch.object(CodexAppServerClient, '__init__', client_init):
+        plugin.register(None)
+        binding = plugin.cron_binding
+        assert cronjob_tools.update_job is jobs.update_job
+        assert getattr(jobs.create_job, '_qq_cron_binding_wrapped', False)
+        (home / 'channel_directory.json').write_text(json.dumps({'platforms': {'qqbot': [
+            {'id': 'other-group', 'type': 'group', 'name': '运营群'},
+            {'id': 'other-user', 'type': 'c2c', 'name': '指定私聊'},
+        ]}}))
+
+        @contextmanager
+        def incoming(chat='source-group', kind='group', text='每天生成报告'):
+            source = SimpleNamespace(platform='qqbot', chat_id=chat, chat_type=kind,
+                                     message_id='msg-' + chat)
+            token = binding._REQUEST.set(None)
+            binding.capture_request(event=SimpleNamespace(source=source, text=text))
+            tokens = set_session_vars(platform='qqbot', chat_id=chat, chat_type=kind,
+                                      message_id=source.message_id, cron_session='')
+            try:
+                yield
+            finally:
+                clear_session_vars(tokens)
+                binding._REQUEST.reset(token)
+
+        def create(**kwargs):
+            return jobs.create_job(prompt='test', schedule='30m', **kwargs)
+
+        def must_reject(call):
+            before = len(jobs.load_jobs())
+            try:
+                call()
+            except (ValueError, RuntimeError):
+                pass
+            else:
+                raise AssertionError('unauthorized target accepted')
+            assert len(jobs.load_jobs()) == before
+
+        for kind in ('group', 'c2c', 'dm'):
+            with incoming(chat='source-' + kind, kind=kind):
+                for deliver in (None, 'origin', 'qqbot', 'local'):
+                    job = create(deliver=deliver, origin={'platform': 'qqbot',
+                                 'chat_id': 'fake-origin', 'chat_type': 'group'})
+                    persisted = jobs.get_job(job['id'])
+                    expected = {'chat_id': 'source-' + kind,
+                                'chat_type': 'c2c' if kind == 'dm' else kind}
+                    assert persisted['deliver'] == 'qqbot:source-' + kind
+                    assert binding.binding_target(persisted) == expected
+                    assert persisted['origin']['chat_id'] == expected['chat_id']
+                    assert plugin.cron_delivery._pinned_target(persisted,
+                               scheduler._normalize_deliver_value)['chat_id'] == expected['chat_id']
+                must_reject(lambda: create(deliver='qqbot:other-group'))
+                must_reject(lambda: create(deliver='all'))
+
+        for text in ('提到运营群而已', '不要发送到：运营群', '> 发送到：运营群',
+                     '```\n发送到：运营群\n```', '```\n发送到：运营群'):
+            with incoming(text=text):
+                must_reject(lambda: create(deliver='qqbot:other-group'))
+                assert create()['deliver'] == 'qqbot:source-group'
+
+        for text, destination in (('每天生成报告，发送到：运营群', 'other-group'),
+                                   ('投递到：qqbot:other-user', 'other-user')):
+            with incoming(text=text):
+                job = create(deliver='qqbot')
+                assert job['deliver'] == 'qqbot:' + destination
+                assert job['origin']['chat_id'] == 'source-group'
+                must_reject(lambda: create(deliver='qqbot:unrequested'))
+
+        with incoming(text='发送到：不存在的群'):
+            must_reject(create)
+        with incoming(text='每天生成报告并发送到运营群'):
+            must_reject(create)  # Must ask for a clear target, not silently use origin.
+        with incoming(text='发送到：运营群\n发给：指定私聊'):
+            must_reject(create)
+
+        with incoming():
+            job = create()
+        with incoming(chat='different-editor', text='发送到：运营群'):
+            updated = jobs.update_job(job['id'], {'name': 'new', 'origin': None})
+            assert binding.binding_target(updated)['chat_id'] == 'source-group'
+            updated = jobs.update_job(job['id'], {'deliver': 'qqbot:other-group'})
+            assert binding.binding_target(updated)['chat_id'] == 'other-group'
+            assert updated['origin']['chat_id'] == 'source-group'
+        must_reject(lambda: jobs.update_job(job['id'], {'deliver': 'qqbot:other-user'}))
+        assert jobs.update_job(job['id'], {'deliver': 'qqbot'})['deliver'] == 'qqbot:other-group'
+        tampered = {**updated, 'deliver': 'qqbot:home-user'}
+        must_reject(lambda: plugin.cron_delivery._pinned_target(tampered,
+                                        scheduler._normalize_deliver_value))
+
+        def concurrent(n):
+            with incoming(chat=f'concurrent-{n}', kind='group' if n % 2 else 'dm'):
+                return create()
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            parallel = list(pool.map(concurrent, range(8)))
+        assert [j['deliver'] for j in parallel] == [f'qqbot:concurrent-{n}' for n in range(8)]
+
+        agent = SimpleNamespace()
+        with incoming(text='发送到：运营群'):
+            assert codex_runtime.run_codex_app_server_turn(agent)['deliver'] == 'qqbot:other-group'
+        assert not agent._qq_cron_context_path.exists()
+        must_reject(lambda: child(agent.child_env))
+        with incoming():
+            assert codex_runtime.run_codex_app_server_turn(agent)['deliver'] == 'qqbot:source-group'
+        assert len(envs) == 1, 'test must reuse the persistent Codex child environment'
+        assert not agent._qq_cron_context_path.exists()
+        assert not list((home / 'cron' / 'qq-context').glob('*.json'))
+
+        # Native cron tool (not only low-level storage) sees the same binding.
+        with incoming(chat='tool-private', kind='dm'):
+            result = json.loads(cronjob_tools.cronjob(action='create', prompt='test',
+                                                     schedule='30m', deliver='qqbot'))
+            assert result['success'], result
+        assert any(j['deliver'] == 'qqbot:tool-private' for j in jobs.load_jobs())
+    print('QQ create/update/native tool/concurrency/Codex child/explicit user override: PASS')
+
+
+if __name__ == '__main__':
+    with tempfile.TemporaryDirectory() as temporary:
+        with patch.dict(os.environ, {'HERMES_HOME': temporary, 'HERMES_SAFE_MODE': '1',
+                                     'HERMES_QQ_CRON_CONTEXT': ''}):
+            main(Path(temporary))

@@ -74,7 +74,7 @@ async def check_route(plugin, chat_type):
         adapter = RecordingQQ(pconfig)
         loop = asyncio.get_running_loop()
         job = {'id': 'test-job', 'name': 'test', 'deliver': 'qqbot',
-               'origin': {'platform': 'qqbot', 'chat_id': 'origin-user', 'chat_type': 'dm' if canonical == 'group' else 'group'}}
+               'origin': {'platform': 'qqbot', 'chat_id': target, 'chat_type': chat_type}}
         with patch('gateway.config.load_gateway_config', return_value=config), \
              patch.object(scheduler, 'load_config', return_value={'cron': {'wrap_response': False}}), \
              patch.object(scheduler, '_get_home_target_chat_id', return_value='home-user'):
@@ -95,13 +95,19 @@ async def check_route(plugin, chat_type):
                     assert error is None, error
                     assert [path for path, _ in fresh.calls] == [message_path], fresh.calls
                     assert fresh._chat_type_map.get(target) == cached
-            assert job['deliver'] == 'qqbot' and job['origin']['chat_id'] == 'origin-user'
+            assert job['deliver'] == 'qqbot' and job['origin']['chat_id'] == target
 
             routes.unlink()
+            # A QQ-created task must never inherit the configured home channel.
+            origin_job = {**job, 'origin': {'platform': 'qqbot', 'chat_id': target,
+                                           'chat_type': chat_type}}
+            assert await send(origin_job) is None
+            assert [path for path, _ in adapter.calls] == [message_path], adapter.calls
+            adapter.calls.clear()
             directory = home / 'channel_directory.json'
             directory.write_text(json.dumps({'platforms': {'qqbot': [
                 {'id': target, 'name': 'native-target', 'type': chat_type}]}}))
-            explicit = {**job, 'deliver': 'qqbot:' + target}
+            explicit = {**job, 'deliver': 'qqbot:' + target, 'origin': None}
             assert await send(explicit) is None
             assert [path for path, _ in adapter.calls] == [message_path], adapter.calls
             adapter.calls.clear()
@@ -195,7 +201,9 @@ async def check_route(plugin, chat_type):
             pins = {'test-job': pin, 'second-job': {'chat_id': target, 'chat_type': opposite}}
             routes.write_text(json.dumps(pins))
             adapter.overlap = asyncio.Event()
-            assert await asyncio.gather(send(), send({**job, 'id': 'second-job'})) == [None, None]
+            second = {**job, 'id': 'second-job', 'origin': {
+                'platform': 'qqbot', 'chat_id': target, 'chat_type': opposite}}
+            assert await asyncio.gather(send(), send(second)) == [None, None]
             adapter.overlap = None
             assert sorted(path for path, _ in adapter.calls) == [
                 f'/v2/groups/{target}/messages', f'/v2/users/{target}/messages']
@@ -227,8 +235,10 @@ async def check_route(plugin, chat_type):
             assert adapter.calls == []
             routes.write_text(json.dumps(pins))
             assert await send({**job, 'id': 'unconfigured'}) is None
-            assert adapter.calls[0][0] == '/v2/users/home-user/messages'
+            assert adapter.calls[0][0] == message_path
             adapter.calls.clear()
+            assert 'refusing home' in await send({**job, 'id': 'unconfigured', 'origin': None})
+            assert adapter.calls == []
 
             # A corrupt policy fails closed; another profile never uses it.
             routes.write_text('{invalid')
@@ -240,7 +250,8 @@ async def check_route(plugin, chat_type):
             other.mkdir()
             token = set_hermes_home_override(other)
             try:
-                assert plugin.cron_delivery._pinned_target(job, scheduler._normalize_deliver_value) is None
+                resolved = plugin.cron_delivery._pinned_target(job, scheduler._normalize_deliver_value)
+                assert resolved['chat_id'] == target and resolved['chat_type'] == canonical
                 try:
                     plugin.cron_delivery._pinned_target(explicit, scheduler._normalize_deliver_value)
                 except ValueError as exc:
