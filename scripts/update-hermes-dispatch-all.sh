@@ -147,4 +147,8 @@ if ((${#failed[@]})); then
   echo "Failed/deferred: ${failed[*]}" >&2
   exit 1
 fi
-echo "All Hermes profiles are current."
+if ((DRY_RUN)); then
+  echo "Preflight passed for all Hermes profiles; no live changes applied."
+else
+  echo "All Hermes profiles are current."
+fi

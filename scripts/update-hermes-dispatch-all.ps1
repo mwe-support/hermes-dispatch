@@ -101,8 +101,12 @@ try {
             try {
                 $arguments = @($Updater, "run", "--profile", $profileName, "--remote", $Remote, "--ref", $Commit, "--hermes-cli", $Hermes, "--git-cli", $Git)
                 if (-not $DryRun) { $arguments += "--apply" }
-                & $Python @arguments 1> $outFile 2> $errFile
-                $code = $LASTEXITCODE
+                $nativePreference = $ErrorActionPreference
+                try {
+                    $ErrorActionPreference = "Continue"  # collect native stderr and aggregate remaining profiles
+                    & $Python @arguments 1> $outFile 2> $errFile
+                    $code = $LASTEXITCODE
+                } finally { $ErrorActionPreference = $nativePreference }
                 $stdout = if (Test-Path $outFile) { Get-Content -LiteralPath $outFile -Raw } else { "" }
                 $stderr = if (Test-Path $errFile) { Get-Content -LiteralPath $errFile -Raw } else { "" }
                 if ($stdout) { [Console]::Out.Write($stdout) }
@@ -138,7 +142,8 @@ try {
     Write-Host "`nCommit: $Commit"
     Write-Host "Updated: $(if ($Updated.Count) { $Updated -join ' ' } else { '(none)' })"
     if ($Failures.Count) { throw "Failed/deferred: $($Failures -join ' ')" }
-    Write-Host "All Hermes profiles are current."
+    if ($DryRun) { Write-Host "Preflight passed for all Hermes profiles; no live changes applied." }
+    else { Write-Host "All Hermes profiles are current." }
 } finally {
     if ($TempRoot -and (Test-Path -LiteralPath $TempRoot)) {
         Remove-Item -LiteralPath $TempRoot -Recurse -Force

@@ -72,24 +72,38 @@ def _patch_execution_scope(scheduler):
         finally:
             _EXECUTION.reset(token)
 
+    def scoped_environment(env):
+        if _owns_qq_delivery():
+            from cron import jobs
+            bootstrap = str(Path(__file__).parent / 'cron_bootstrap')
+            core = str(Path(jobs.__file__).resolve().parents[1])
+            env.update({AUTO_ENV: '1', 'HERMES_QQ_CRON_BOOTSTRAP': bootstrap,
+                        'HERMES_QQ_CRON_CORE': core})
+            env['PYTHONPATH'] = os.pathsep.join([bootstrap, core, env.get('PYTHONPATH', '')])
+        return env
+
     def environment(original):
         @functools.wraps(original)
         def build(*args, **kwargs):
-            env = original(*args, **kwargs)  # Retain upstream credential scrubbing.
-            if _owns_qq_delivery():
-                from cron import jobs
-                bootstrap = str(Path(__file__).parent / 'cron_bootstrap')
-                core = str(Path(jobs.__file__).resolve().parents[1])
-                env.update({AUTO_ENV: '1', 'HERMES_QQ_CRON_BOOTSTRAP': bootstrap,
-                            'HERMES_QQ_CRON_CORE': core})
-                env['PYTHONPATH'] = os.pathsep.join([bootstrap, core, env.get('PYTHONPATH', '')])
-            return env
+            # Retain upstream credential scrubbing before adding policy context.
+            return scoped_environment(original(*args, **kwargs))
         return build
 
     setattr(run, marker, True)
     replacements = [(original_run, run)] + [
         (getattr(local, name), environment(getattr(local, name)))
         for name in ('build_subprocess_env', 'hermes_subprocess_env')]
+    original_python = getattr(scheduler, '_windows_cron_python_invocation', None)
+    if original_python is not None:
+        @functools.wraps(original_python)
+        def python_invocation(*args, **kwargs):
+            executable, overlay = original_python(*args, **kwargs)
+            # Hermes applies this after build_subprocess_env on Windows uv
+            # installs. Keep its venv/.pth overlay without losing the QQ hook.
+            if overlay and _owns_qq_delivery():
+                overlay = scoped_environment(dict(overlay))
+            return executable, overlay
+        replacements.append((original_python, python_invocation))
     for name, module in list(sys.modules.items()):
         if module is None or name.split('.')[0] not in {'cron', 'tools', 'agent', 'gateway', 'hermes_cli'}:
             continue

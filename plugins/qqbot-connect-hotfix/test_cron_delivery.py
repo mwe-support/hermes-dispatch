@@ -1,6 +1,7 @@
 """Real scheduler -> DeliveryRouter -> QQAdapter; replace only the QQ wire."""
 import asyncio
 import base64
+from contextlib import nullcontext
 import importlib.util
 import json
 import os
@@ -122,8 +123,12 @@ async def check_route(plugin, chat_type):
 from unittest.mock import patch
 from gateway.config import Platform
 from tools import send_message_tool
-with patch('socket.socket.connect', side_effect=AssertionError('network forbidden')):
-    result = asyncio.run(send_message_tool._send_to_platform(Platform.QQBOT, None, 'synthetic', 'extra'))
+loop = asyncio.new_event_loop()  # Windows creates its local wakeup sockets here.
+try:
+    with patch('socket.socket.connect', side_effect=AssertionError('network forbidden')):
+        result = loop.run_until_complete(send_message_tool._send_to_platform(Platform.QQBOT, None, 'synthetic', 'extra'))
+finally:
+    loop.close()
 assert not result['success'] and 'automatic' in result['error'], result
 '''], env=env, capture_output=True, text=True, timeout=30)
                 assert probe.returncode == 0, probe.stderr
@@ -222,8 +227,12 @@ assert not result['success'] and 'automatic' in result['error'], result
 from unittest.mock import patch
 from gateway.config import Platform
 from tools import send_message_tool
-with patch('socket.socket.connect', side_effect=AssertionError('network forbidden in probe')):
-    result = asyncio.run(send_message_tool._send_to_platform(Platform.QQBOT, None, 'synthetic', 'extra'))
+loop = asyncio.new_event_loop()  # Windows creates its local wakeup sockets here.
+try:
+    with patch('socket.socket.connect', side_effect=AssertionError('network forbidden in probe')):
+        result = loop.run_until_complete(send_message_tool._send_to_platform(Platform.QQBOT, None, 'synthetic', 'extra'))
+finally:
+    loop.close()
 assert not result['success'] and 'automatic' in result['error'], result
 assert 'run_agent' not in sys.modules
 print('no-agent route probe; manual QQ send blocked')
@@ -323,8 +332,17 @@ print('no-agent route probe; manual QQ send blocked')
 
 async def main():
     plugin = load_plugin()
-    for chat_type in sys.argv[1:] or ('group', 'c2c', 'dm'):
-        await check_route(plugin, chat_type)
+    # Reproduce the native Windows uv overlay on POSIX too: upstream applies
+    # it after build_subprocess_env, so it must retain the QQ bootstrap path.
+    with tempfile.TemporaryDirectory() as tmp:
+        site = Path(tmp, 'Lib', 'site-packages')
+        site.mkdir(parents=True)
+        overlay = {'VIRTUAL_ENV': tmp, 'PYTHONPATH': str(site)}
+        native = nullcontext() if os.name == 'nt' else patch.object(
+            scheduler, '_windows_cron_python_invocation', return_value=(sys.executable, overlay))
+        with native:
+            for chat_type in sys.argv[1:] or ('group', 'c2c', 'dm'):
+                await check_route(plugin, chat_type)
 
 
 if __name__ == '__main__':
