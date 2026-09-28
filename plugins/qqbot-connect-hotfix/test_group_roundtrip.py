@@ -108,6 +108,33 @@ async def main():
     assert event.text == "hello bot"
     assert "earlier group context" in event.channel_context
 
+    # QQ serializes real @ chips as <@id>, including after slash arguments.
+    # Exercise adapter -> BasePlatformAdapter -> MessageEvent command parsing.
+    cases = [
+        ("<@bot-openid> /model gpt-6-luna --global", "model", "gpt-6-luna --global"),
+        ("/model gpt-6-luna --global<@bot-openid>", "model", "gpt-6-luna --global"),
+        ("/model <@bot-openid>", "model", ""),
+        ("<@bot-openid> /help", "help", ""),
+        ("/reasoning high <@bot-openid>", "reasoning", "high"),
+        ("<@bot-openid> /stop", "stop", ""),
+        ("<@bot-openid> /model user@provider <@other>", "model", "user@provider <@other>"),
+        ("hello <@bot-openid>", None, "hello <@bot-openid>"),
+    ]
+    for index, (text, command, args) in enumerate(cases):
+        raw = {
+            "id": f"slash-{index}", "content": text, "group_openid": "group-test",
+            "author": {"member_openid": "member-b"},
+            "mentions": [{"id": "bot-openid", "bot": True, "is_you": True}],
+        }
+        await adapter._on_message("GROUP_AT_MESSAGE_CREATE", raw)
+        await anyio.sleep(0)
+        for task in list(adapter._session_tasks.values()):
+            await task
+        event = received[-1]
+        assert event.get_command() == command, (text, event.text)
+        assert event.get_command_args().strip() == args, (text, event.text)
+        assert raw["content"] == text  # retain original transport evidence
+
     requests = []
 
     async def fake_api_request(method, path, body=None, **_kwargs):
@@ -128,6 +155,7 @@ async def main():
     assert path == "/v2/groups/group-test/messages"
     assert body["content"] == "offline group reply"
 
+    print("group_slash_self_mentions=true")
     print("group_receive_event=true")
     print("group_context_injected=true")
     print("group_send_route=/v2/groups/group-test/messages")

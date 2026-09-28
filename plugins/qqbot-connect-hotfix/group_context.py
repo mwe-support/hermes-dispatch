@@ -85,6 +85,17 @@ def patch_group_channel_context(QQAdapter):
     async def handle_message(self, event):
         raw = getattr(event, "raw_message", None)
         if isinstance(raw, dict):
+            # Full-group QQ payloads can retain the self @ chip before/after
+            # a command. Strip only verified self mentions, before dispatch;
+            # other mentions and ordinary conversation text remain intact.
+            if getattr(getattr(event, "source", None), "chat_type", None) == "group":
+                text = event.text or ""
+                mentions = raw.get("mentions")
+                for mention in mentions if isinstance(mentions, list) else []:
+                    if isinstance(mention, dict) and mention.get("is_you") is True and mention.get("id"):
+                        text = text.replace(f"<@{mention['id']}>", " ")
+                if text.lstrip().startswith("/"):
+                    event.text = text.strip()
             context = raw.pop("_qqbot_channel_context", None)
             if context and not getattr(event, "channel_context", None):
                 event.channel_context = str(context)

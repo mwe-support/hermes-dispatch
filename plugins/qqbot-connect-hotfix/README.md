@@ -1053,3 +1053,44 @@ uses a timestamped inbound anchor within 295 seconds, never reattaches a known
 expired anchor during standalone fallback, and preserves newer inbound cache
 entries. This prevents deployment of the cron guard from removing the already
 installed reply-window fix. `test_expired_reply.py` covers the combined order.
+
+
+## QQ group slash self-mention normalization (1.8.35)
+
+Observed full-group QQ payloads retain `<@id>` self-mention chips before or
+immediately after `/model` arguments. Hermes' QQ adapter only strips a leading
+plain `@name`, so a leading chip turns a command into ordinary chat, while a
+trailing chip becomes part of the model name or flags. This also affects other
+slash commands. The official [GROUP_AT_MESSAGE_CREATE contract](https://bot.q.qq.com/wiki/develop/api-v2/autogen/event/group_at_message_create.html)
+describes an already-stripped prefix; the observed full-group transport differs.
+
+Before the existing Gateway dispatch, the plugin removes only chips identified
+by `mentions[].is_you == true`, only from group messages whose resulting text
+starts with `/`. Other users' mentions, literal `user@provider` arguments,
+ordinary conversation text, raw content, and Gateway permission checks remain
+unchanged. No Hermes source file or command handler is replaced.
+
+Enable with `scripts/install-plugins.sh <HERMES_HOME> qqbot-connect-hotfix` and
+restart that profile's idle Gateway. Run `test_group_roundtrip.py` with the
+installed Hermes core on `PYTHONPATH`; it covers prefix/suffix/attached chips,
+`/model`, `/help`, `/reasoning`, `/stop`, preserved other mentions, and ordinary
+chat through the real adapter callback. Live verification must use actual QQ
+@ chips both before and after `/model`, then inspect the next actual model turn;
+a configuration acknowledgment alone is insufficient.
+
+Rollback with `scripts/install-plugins.sh --restore <HERMES_HOME>
+qqbot-connect-hotfix <backup-directory>` and restart the same profile. This
+normalization changes no persisted model settings; a previously malformed
+session model must be corrected using a valid `/model ... --session` command.
+
+
+2026-09-28 acceptance: local and operations Mac mini each passed all 22 release
+regressions and real QQ group prefix/suffix `/model` queries, a `--once` model
+switch, its generated reply, and private `/model`. Local `turn_context` changed
+to `gpt-5.6-terra`; a separate private `--global` change propagated to the group,
+and restoring the original default propagated back to `gpt-6-luna`. This is a
+QQ parsing acceptance, not a claim that procurement's reported `--global`
+problem is resolved: its actual host/profile remains to be identified. The
+Windows product-R&D peer queried during diagnosis had no procurement profile.
+No global-model precedence behavior is changed by 1.8.35. Overseas business's
+subscription expiry was reported separately by the user.
