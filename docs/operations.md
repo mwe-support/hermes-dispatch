@@ -574,3 +574,15 @@ of the same minor version, back up venv startup files, then use uv's native
 and `hermes --version`. This preserves packages; do not use `--clear` or change
 execution policy to mask a missing interpreter. See the official
 [uv Python guide](https://docs.astral.sh/uv/guides/install-python/).
+
+
+The macOS/Linux all-profile entrypoint also runs the existing QQ cron launcher
+installer before profile changes. Some generated `hermes` shell launchers clear
+`PYTHONPATH`; without the conditional bootstrap, the newly installed QQ binding
+plugin cannot cover CLI-created jobs. The installer is idempotent, validates
+ownership, skips unsupported/non-clearing/symlink launchers, and never edits
+Hermes core. A setup failure stops before profile mutation. Dry-run leaves the
+launcher unchanged. Its separate original-file backup is printed under the
+native Hermes root's `plugin-backups/qq-cron-launcher-*`; restore that file when
+rolling back this host prerequisite, in addition to any profile snapshots.
+Windows uses its native launcher and the QQ plugin's venv-overlay integration.
