@@ -100,6 +100,17 @@ for path in "$HERMES_ROOT"/profiles/*; do
   profiles+=("$profile")
 done
 
+# The generated host launcher may clear PYTHONPATH before the QQ cron hook
+# can run. Reuse its owner-checked, atomic installer before updating profiles.
+if (( ! DRY_RUN )) && [[ -f $SOURCE/scripts/install-qq-cron-bootstrap.py && -d $SOURCE/plugins/qqbot-connect-hotfix ]]; then
+  launcher=$HOME/.local/bin/hermes
+  [[ -f $launcher ]] || launcher=$HERMES
+  if ! "$PYTHON" "$SOURCE/scripts/install-qq-cron-bootstrap.py" --home "$HERMES_ROOT" --launcher "$launcher"; then
+    echo "QQ cron launcher setup failed; profiles were not changed" >&2
+    exit 1
+  fi
+fi
+
 ok=()
 failed=()
 for item in "${unsafe[@]-}"; do
