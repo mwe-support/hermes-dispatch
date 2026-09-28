@@ -47,6 +47,7 @@
     "plugins/message-snapshot-store/test_quoted_attachment.py",
     "plugins/message-snapshot-store/test_whatsapp_capture.py",
     "scripts/test_install_codex_qq_hook.py",
-    "ops/test_hermes_dispatch_update.py"
+    "ops/test_hermes_dispatch_update.py",
+    "plugins/qqbot-connect-hotfix/test_model_scope.py"
   ]
 }

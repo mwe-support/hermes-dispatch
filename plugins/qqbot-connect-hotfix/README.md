@@ -1088,9 +1088,50 @@ session model must be corrected using a valid `/model ... --session` command.
 regressions and real QQ group prefix/suffix `/model` queries, a `--once` model
 switch, its generated reply, and private `/model`. Local `turn_context` changed
 to `gpt-5.6-terra`; a separate private `--global` change propagated to the group,
-and restoring the original default propagated back to `gpt-6-luna`. This is a
-QQ parsing acceptance, not a claim that procurement's reported `--global`
-problem is resolved: its actual host/profile remains to be identified. The
-Windows product-R&D peer queried during diagnosis had no procurement profile.
-No global-model precedence behavior is changed by 1.8.35. Overseas business's
-subscription expiry was reported separately by the user.
+and restoring the original default propagated back to `gpt-6-luna`. Version 1.8.35 changes QQ parsing only; the subsequent global-inheritance fix
+and procurement verification are documented below.
+
+
+## QQ global model inheritance (1.8.36)
+
+Upstream Hermes writes a session model override even for `/model ... --global`.
+When another conversation changes the global default later, the original
+caller stays pinned to its old model, including after a Gateway restart. This
+was confirmed in procurement: its older private chat had selected its persisted
+model with `--global`, not `--session`.
+
+The plugin scopes the existing QQ text model handler and its deferred selection
+confirmation. After the native config save actually succeeds, it clears only
+the initiating conversation's model override through the native session store,
+then evicts its cached Agent. Explicit `--session` and `--once` behavior, other
+conversations' intentional overrides, non-QQ commands, provider validation,
+permission checks and cancelled selections remain native. Failed config writes
+retain the native session fallback. No Hermes source is edited.
+
+Install the plugin in the selected profile and restart its idle Gateway. Run
+`test_model_scope.py` with that Hermes core on `PYTHONPATH`: two QQ conversations
+set different global models in sequence, then the first must resolve the second
+model both live and after rebuilding the runner. It also checks explicit
+session overrides, failed persistence and deferred confirmation/cancellation.
+
+Existing old pins cannot be classified from the stored model alone. For an
+upgrade, back up the profile and clear a legacy override only when its original
+latest successful model command proves it was `--global`; use the native
+SessionStore with that profile's Gateway stopped. Do not delete sessions or
+blindly clear every model override. Unproven legacy pins remain unchanged.
+
+Rollback uses the installer's exact plugin backup and a restart of the same
+profile. A legacy migration additionally requires restoring the backed-up
+routing/session state while that Gateway is stopped. A removed global pin
+otherwise remains cleared, so future default changes continue to apply.
+
+
+2026-09-28 acceptance of 1.8.36: local, operations Mac mini, and procurement on
+`mwe-product-development-mac-mini` each passed all 23 release checks plus the
+final model-scope regression. In each instance, a real QQ private chat selected
+global model A, a real group then selected model B, and the original private
+chat's next Codex `turn_context` used B. Group and private reply markers were
+received in QQ. Model defaults were restored to their initial values. Four
+historical global pins were confirmed against original commands and cleared:
+two in procurement, one local, and one operations. Explicit session behavior is
+covered by the native-handler regression and is not globally reset.
