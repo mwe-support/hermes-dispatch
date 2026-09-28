@@ -396,6 +396,27 @@ class UpdaterTests(unittest.TestCase):
             self.assertEqual(result, {"status": "deferred", "commit": result["commit"], "active_agents": 1})
             regression.assert_not_called()
 
+    def test_work_started_during_regressions_defers_before_mutation(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp); source = make_fixture_repo(base); home = base / "home"
+            home.mkdir(); write_plugin(home, "sample", "1", "old")
+            gateway = {"gateway_state": "stopped", "active_agents": 0}
+            args = argparse.Namespace(profile="default", remote=str(source), ref="main",
+                hermes_cli=sys.executable, git_cli=shutil_which_git(), health_timeout=1,
+                apply=True, retry_blocked=False)
+            with patch.object(ops, "profile_home", return_value=home), patch.object(
+                ops, "hermes_version", return_value=(0, 20, 5)
+            ), patch.object(ops, "desired_state_drift", return_value=[]), patch.object(
+                ops, "read_gateway_state", side_effect=lambda _: dict(gateway)
+            ), patch.object(ops, "run_regressions", side_effect=lambda *a: gateway.update(
+                gateway_state="running", active_agents=1, pid=42)
+            ), patch.object(ops, "qqbot_enabled", return_value=False), patch.object(
+                ops, "apply_managed_settings"
+            ):
+                self.assertEqual(ops.perform_update(args)["status"], "deferred")
+            self.assertEqual((home / "plugins/sample/runtime.py").read_text(), "old")
+            self.assertFalse((home / "update-backups").exists())
+
     def test_scheduler_arguments_default_to_dry_run(self) -> None:
         args = argparse.Namespace(
             profile="sales",
