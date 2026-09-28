@@ -22,11 +22,13 @@ def main():
             spec = importlib.util.spec_from_file_location('scope_test_patch', candidate)
             mod = importlib.util.module_from_spec(spec); spec.loader.exec_module(mod)
             mod.patch_global_model_scope(gw.GatewayRunner)
+        stores = []
         def runner():
             r = object.__new__(gw.GatewayRunner)
             r.config = GatewayConfig(); r.adapters = {}; r._voice_mode = {}
             r._session_model_overrides = {}; r._running_agents = {}; r._session_db = None
             r.session_store = SessionStore(Path(tmp, 'sessions'), r.config)
+            stores.append(r.session_store)
             r._async_session_store = gw.AsyncSessionStore(r.session_store)
             return r
         def event(chat, text):
@@ -85,6 +87,14 @@ def main():
              patch('hermes_cli.model_selection_guards.combined_selection_warning',return_value=None), \
              patch.object(gw,'_resolve_runtime_agent_kwargs',return_value={'provider':'openai-codex','api_key':'test-only'}), \
              patch.object(gw,'_resolve_runtime_agent_kwargs_for_provider',return_value={'provider':'openai-codex','api_key':'test-only'}):
-            asyncio.run(scenario())
+            try:
+                asyncio.run(scenario())
+            finally:
+                for store in stores:
+                    close = getattr(store, 'close_all_db_handles', None)
+                    if close:
+                        close()
+                    elif getattr(store, '_db', None):
+                        store._db.close()
 
 if __name__=='__main__':main()

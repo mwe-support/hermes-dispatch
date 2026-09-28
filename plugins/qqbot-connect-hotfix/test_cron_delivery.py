@@ -122,8 +122,12 @@ async def check_route(plugin, chat_type):
 from unittest.mock import patch
 from gateway.config import Platform
 from tools import send_message_tool
-with patch('socket.socket.connect', side_effect=AssertionError('network forbidden')):
-    result = asyncio.run(send_message_tool._send_to_platform(Platform.QQBOT, None, 'synthetic', 'extra'))
+loop = asyncio.new_event_loop()  # Windows creates its local wakeup sockets here.
+try:
+    with patch('socket.socket.connect', side_effect=AssertionError('network forbidden')):
+        result = loop.run_until_complete(send_message_tool._send_to_platform(Platform.QQBOT, None, 'synthetic', 'extra'))
+finally:
+    loop.close()
 assert not result['success'] and 'automatic' in result['error'], result
 '''], env=env, capture_output=True, text=True, timeout=30)
                 assert probe.returncode == 0, probe.stderr
@@ -222,8 +226,12 @@ assert not result['success'] and 'automatic' in result['error'], result
 from unittest.mock import patch
 from gateway.config import Platform
 from tools import send_message_tool
-with patch('socket.socket.connect', side_effect=AssertionError('network forbidden in probe')):
-    result = asyncio.run(send_message_tool._send_to_platform(Platform.QQBOT, None, 'synthetic', 'extra'))
+loop = asyncio.new_event_loop()  # Windows creates its local wakeup sockets here.
+try:
+    with patch('socket.socket.connect', side_effect=AssertionError('network forbidden in probe')):
+        result = loop.run_until_complete(send_message_tool._send_to_platform(Platform.QQBOT, None, 'synthetic', 'extra'))
+finally:
+    loop.close()
 assert not result['success'] and 'automatic' in result['error'], result
 assert 'run_agent' not in sys.modules
 print('no-agent route probe; manual QQ send blocked')
