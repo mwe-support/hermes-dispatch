@@ -796,6 +796,15 @@ def perform_update(args: argparse.Namespace) -> dict[str, Any]:
                     "state_drift": drift,
                 }
 
+            # Regressions can take minutes. Respect work (or a stop/start)
+            # that happened after the initial idle check, before any mutation.
+            gateway = read_gateway_state(home)
+            active = int(gateway.get("active_agents") or 0)
+            if active:
+                save_state(state_path, state, last_seen_commit=commit,
+                           last_result="deferred-active-agents", active_agents=active)
+                return {"status": "deferred", "commit": commit, "active_agents": active}
+
             was_running = gateway_running(gateway)
             require_qq_ready = qqbot_enabled(hermes, args.profile)
             preflight_active_plugins(home, changed)

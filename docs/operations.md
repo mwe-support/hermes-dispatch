@@ -548,7 +548,9 @@ retain their normal command form.
 
 A cached `last_tested_commit` no longer bypasses current CLI/version validation
 or regressions when changes are pending. Dry-run completion explicitly reports
-preflight success, not that an update was applied. Busy profiles still defer.
+preflight success, not that an update was applied. Busy profiles still defer;
+activity and running state are re-read after regressions, immediately before
+backup and live mutation, so a task started during testing also defers the update.
 
 For a running Gateway, the updater waits for its old PID to exit and its API
 address to become bindable before restart. It requires a fresh live PID plus
