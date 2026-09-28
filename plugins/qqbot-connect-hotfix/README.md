@@ -957,3 +957,203 @@ private/group chats: four real files were downloaded with matching bytes, zero
 example files uploaded. The exact four model replies each reproduce zero
 attachments through 1.8.24 and one through the fix. This is targeted delivery
 acceptance, not a claim about natural generation or unlimited input coverage.
+
+## Automatic QQ cron conversation binding (1.8.34)
+
+[Issue #12](https://github.com/mwe-support/hermes-dispatch/issues/12) requires a
+job created in a QQ group or private chat to keep that conversation as its
+recipient. Home is never an implicit substitute. Only an explicit destination
+instruction in the creating/editing user's original message may change it.
+The removable plugin enforces this at job creation/update and actual delivery;
+Hermes source files are unchanged.
+
+The native Hermes `pre_gateway_dispatch` hook captures the inbound QQ source
+and original delivery instruction. A per-message Gateway scope expires that
+context on return (including copies inherited by background tasks); internal
+messages cannot borrow an earlier user request. QQ may omit the optional
+session message ID, so it is not used as the sole authorization gate.
+`cron.jobs.create_job` persists the exact
+ID/type and `_qq_delivery_binding` inside the job's `origin`, in the same atomic
+write as the job itself. The default applies even if the model supplies
+`qqbot`, `origin` or `local`. Model-supplied origin fields cannot replace the
+inbound source. `dm` is normalized to QQ `c2c`. Changes to schedules/prompts or
+editing the task from another conversation retain its existing target.
+
+For an intentional override, use a clear clause in the user message, e.g.:
+
+```text
+每天生成报告，发送到：运营群
+投递到：qqbot:EXACT_NATIVE_CONVERSATION_ID
+```
+
+The name must be unique in this profile's `channel_directory.json`; QQ account
+numbers are not native bot-specific IDs. Quoted examples, code blocks, negative
+instructions and model-generated tool arguments are not authorization. An
+unknown, ambiguous or unclear delivery clause returns an error instead of
+silently choosing home or the source. These errors block only cron mutations,
+not ordinary chat or other tools. Arbitrary prose is not interpreted by a
+second model: the error requests an unambiguous delivery clause. No new job pin
+file is required for normal group/private scheduling.
+
+**Hermes owns enforcement.** Codex's native UserPromptSubmit hook remains only
+an attachment-format reminder. The Hermes plugin supplies an active-turn
+context file to Codex child tools; it contains route data, not message history
+or credentials, and is removed when the turn ends. A persistent Codex process
+reads fresh context on its next turn. A QQ-child-only `PYTHONPATH` bootstrap attaches the same binding policy after
+`cron.jobs` finishes importing: upstream `hermes cron create` otherwise skips
+plugin discovery. This also covers absolute Python/CLI paths without requiring
+the model to remember an alternate command. Unrelated Python programs do not
+import Hermes, and any existing `sitecustomize` is preserved. The Python bootstrap is scoped to the managed QQ child environment; it does
+not change global Python startup or Codex config. A generated CLI launcher may
+need the conditional outer-shell Hook described below. Deliberately stripping that environment or editing jobs.json
+directly is outside the supported scheduling API; unbound platform-only QQ
+jobs are refused at delivery, never sent to home.
+
+At delivery, the persisted binding wins over current home settings, directory
+cache changes and model output. Legacy QQ-origin jobs use their recorded source
+ID/type (type may be recovered from this profile's directory); missing or
+conflicting routes fail closed. Existing `cron/delivery-targets.json` pins remain
+available for externally created legacy jobs, but cannot override a QQ source
+or persisted binding. Legacy cross-conversation jobs without binding evidence
+must be explicitly retargeted from a QQ user turn before they can deliver.
+Audit those jobs before upgrading; do not invent an origin for an old job.
+Unbound `local` jobs and other platforms retain their behavior.
+
+QQ-auto-delivered jobs also own their output during execution. Extra QQ
+`send_message` calls (including a bare `qqbot` that would select home) are
+blocked; matching duplicate sends retain the upstream skip result. The agent
+must return its content for the scheduler to deliver. A task-local execution
+flag is propagated through the existing sanitized subprocess factories, so
+Codex/MCP children and `no_agent` scripts receive the same guard. No credentials
+are added. Foreground QQ messaging and other platforms are unchanged.
+
+Text, files and images use the same fixed target and original uploader. A live
+QQ adapter/Gateway loop is required; failed sends never fall back to standalone
+endpoint guessing. A QQ API receipt `id` must match the adapter's message ID.
+Failures, including missing receipts, reach `last_delivery_error` even if the
+script itself succeeded. QQ proactive-message permissions remain necessary.
+
+Enable with `scripts/install-plugins.sh <HERMES_HOME> qqbot-connect-hotfix`.
+For generated shell launchers that clear `PYTHONPATH`, also run:
+
+```sh
+python3 scripts/install-qq-cron-bootstrap.py --home "$HERMES_HOME" --launcher "$(command -v hermes)"
+```
+
+This installs a conditional block in the **outer generated shell launcher**,
+not Hermes source: only QQ children retain `HERMES_QQ_CRON_BOOTSTRAP`; ordinary
+calls still clear `PYTHONPATH`. It backs up the launcher under the profile's
+`plugin-backups`, preserves its mode, refuses different owners/core paths,
+and supports `--remove`. Native launchers without the clearing line need no
+change. A symlink or unsupported clearing launcher must be inspected rather
+than assuming the bootstrap is active. A PATH-only shim is insufficient when
+a login shell reorders PATH; real acceptance caught this on macOS.
+
+Restart the idle Gateway after installation. No Codex native-hook trust change
+or manual job pin is needed. Use an orderly stop and actual port-bind readiness check for macOS API
+restarts as described in [the issue notes](../../docs/issues-9-12-hooks.md).
+
+Run `test_cron_binding.py` and `test_cron_delivery.py` using Hermes' Python and
+an isolated home. They cover persisted creation, the native tool and real CLI,
+updates, explicit user overrides, concurrency, persistent Codex child reuse,
+expired turn contexts, no-agent delivery, media, profile isolation, conflicts
+and receipt errors. Both are included in the release manifest. Live acceptance
+must create the jobs from actual group/private messages without manual origin
+or pin injection; earlier explicit-target/pin acceptance is insufficient.
+
+Rollback using the exact plugin backup and restart the Gateway. New job records
+already contain explicit destinations, so keep their binding metadata and
+recipient unless the user changes the task. Do not delete metadata to restore
+home routing. Stopping the Gateway also retires its child bootstrap environment. To remove
+the outer launcher Hook, run the installer with `--remove` after confirming no
+other profile uses it; the original `unset PYTHONPATH` behavior is restored
+without overwriting unrelated launcher edits. Removing the plugin removes the guard and
+restores upstream behavior, including its prior type/fallback risks.
+
+The combined candidate retains issue #10 protection: group passive fallback
+uses a timestamped inbound anchor within 295 seconds, never reattaches a known
+expired anchor during standalone fallback, and preserves newer inbound cache
+entries. This prevents deployment of the cron guard from removing the already
+installed reply-window fix. `test_expired_reply.py` covers the combined order.
+
+
+## QQ group slash self-mention normalization (1.8.35)
+
+Observed full-group QQ payloads retain `<@id>` self-mention chips before or
+immediately after `/model` arguments. Hermes' QQ adapter only strips a leading
+plain `@name`, so a leading chip turns a command into ordinary chat, while a
+trailing chip becomes part of the model name or flags. This also affects other
+slash commands. The official [GROUP_AT_MESSAGE_CREATE contract](https://bot.q.qq.com/wiki/develop/api-v2/autogen/event/group_at_message_create.html)
+describes an already-stripped prefix; the observed full-group transport differs.
+
+Before the existing Gateway dispatch, the plugin removes only chips identified
+by `mentions[].is_you == true`, only from group messages whose resulting text
+starts with `/`. Other users' mentions, literal `user@provider` arguments,
+ordinary conversation text, raw content, and Gateway permission checks remain
+unchanged. No Hermes source file or command handler is replaced.
+
+Enable with `scripts/install-plugins.sh <HERMES_HOME> qqbot-connect-hotfix` and
+restart that profile's idle Gateway. Run `test_group_roundtrip.py` with the
+installed Hermes core on `PYTHONPATH`; it covers prefix/suffix/attached chips,
+`/model`, `/help`, `/reasoning`, `/stop`, preserved other mentions, and ordinary
+chat through the real adapter callback. Live verification must use actual QQ
+@ chips both before and after `/model`, then inspect the next actual model turn;
+a configuration acknowledgment alone is insufficient.
+
+Rollback with `scripts/install-plugins.sh --restore <HERMES_HOME>
+qqbot-connect-hotfix <backup-directory>` and restart the same profile. This
+normalization changes no persisted model settings; a previously malformed
+session model must be corrected using a valid `/model ... --session` command.
+
+
+2026-09-28 acceptance: local and operations Mac mini each passed all 22 release
+regressions and real QQ group prefix/suffix `/model` queries, a `--once` model
+switch, its generated reply, and private `/model`. Local `turn_context` changed
+to `gpt-5.6-terra`; a separate private `--global` change propagated to the group,
+and restoring the original default propagated back to `gpt-6-luna`. Version 1.8.35 changes QQ parsing only; the subsequent global-inheritance fix
+and procurement verification are documented below.
+
+
+## QQ global model inheritance (1.8.36)
+
+Upstream Hermes writes a session model override even for `/model ... --global`.
+When another conversation changes the global default later, the original
+caller stays pinned to its old model, including after a Gateway restart. This
+was confirmed in procurement: its older private chat had selected its persisted
+model with `--global`, not `--session`.
+
+The plugin scopes the existing QQ text model handler and its deferred selection
+confirmation. After the native config save actually succeeds, it clears only
+the initiating conversation's model override through the native session store,
+then evicts its cached Agent. Explicit `--session` and `--once` behavior, other
+conversations' intentional overrides, non-QQ commands, provider validation,
+permission checks and cancelled selections remain native. Failed config writes
+retain the native session fallback. No Hermes source is edited.
+
+Install the plugin in the selected profile and restart its idle Gateway. Run
+`test_model_scope.py` with that Hermes core on `PYTHONPATH`: two QQ conversations
+set different global models in sequence, then the first must resolve the second
+model both live and after rebuilding the runner. It also checks explicit
+session overrides, failed persistence and deferred confirmation/cancellation.
+
+Existing old pins cannot be classified from the stored model alone. For an
+upgrade, back up the profile and clear a legacy override only when its original
+latest successful model command proves it was `--global`; use the native
+SessionStore with that profile's Gateway stopped. Do not delete sessions or
+blindly clear every model override. Unproven legacy pins remain unchanged.
+
+Rollback uses the installer's exact plugin backup and a restart of the same
+profile. A legacy migration additionally requires restoring the backed-up
+routing/session state while that Gateway is stopped. A removed global pin
+otherwise remains cleared, so future default changes continue to apply.
+
+
+2026-09-28 acceptance of 1.8.36: local, operations Mac mini, and procurement on
+`mwe-product-development-mac-mini` each passed all 23 release checks plus the
+final model-scope regression. In each instance, a real QQ private chat selected
+global model A, a real group then selected model B, and the original private
+chat's next Codex `turn_context` used B. Group and private reply markers were
+received in QQ. Model defaults were restored to their initial values. Four
+historical global pins were confirmed against original commands and cleared:
+two in procurement, one local, and one operations. Explicit session behavior is
+covered by the native-handler regression and is not globally reset.

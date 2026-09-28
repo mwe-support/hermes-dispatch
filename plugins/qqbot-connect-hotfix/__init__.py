@@ -11,6 +11,7 @@ from .channel_directory import (
     lookup_channel_directory_type as _lookup_channel_directory_type,
     patch_channel_directory_chat_type as _patch_channel_directory_chat_type,
 )
+from .cron_delivery import patch_cron_delivery as _patch_cron_delivery
 from .connect import patch_connect_signature as _patch_connect_signature
 from .emoji import (
     describe_qq_face_only_message as _describe_qq_face_only_message,
@@ -60,6 +61,9 @@ def register(ctx):
         logger.warning("qqbot-connect-hotfix: could not import QQAdapter: %s", exc)
         return
 
+    from .cron_binding import register_binding
+    register_binding(ctx)
+
     _patch_connect_signature(QQAdapter)
     _patch_group_config_interactions(QQAdapter)
     _patch_channel_directory_chat_type(QQAdapter)
@@ -72,6 +76,7 @@ def register(ctx):
     _patch_media_caption_retry(QQAdapter)
     _patch_output_file_delivery(QQAdapter)
     _defer_gateway_methods(QQAdapter)
+    _patch_cron_delivery(QQAdapter)
 
 
 def _defer_gateway_methods(QQAdapter):
@@ -98,6 +103,11 @@ def _defer_gateway_methods(QQAdapter):
 
 
 def _patch_gateway_methods(QQAdapter):
+    from gateway.run import GatewayRunner
+    from .cron_binding import patch_gateway_scope
+    patch_gateway_scope(GatewayRunner)
+    from .model_scope import patch_global_model_scope
+    patch_global_model_scope(GatewayRunner)
     _patch_post_stream_media_failures(QQAdapter)
     streaming_status = _patch_qq_c2c_streaming(QQAdapter)
     logger.info("qqbot-connect-hotfix: %s", streaming_status)

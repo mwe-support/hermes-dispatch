@@ -653,7 +653,12 @@ Hermes profile 占用同一个 Codex home 的托管 hook。来源标记
 原生机制见 [Codex Hooks](https://learn.chatgpt.com/docs/hooks#userpromptsubmit)，
 契约与隔离边界见 [插件 README](../plugins/codex-app-server-phase-hotfix/README.md#qq-file-delivery-hook-184)。
 
-### 9.2 已知限制：Hermes MCP 插件加载
+### 9.2 Hermes MCP 冷启动与工具可用性
+
+`codex-app-server-phase-hotfix` 1.8.7 已修复下面描述的注册期循环导入：
+延迟到首次 Codex turn、会话创建前安装生命周期补丁。请运行插件 `test_startup.py`
+并重启目标 Gateway 验证。MCP 工具导出名单、权限和会话隔离仍需分别验证。
+下文是 1.8.5 的历史故障记录。
 
 2026-09-07 首次在 1.8.5 上复现，1.8.6 仍未改变此边界：独立
 `hermes-tools` MCP 子进程加载插件时，`model_tools` 与 `run_agent` 循环导入，报
