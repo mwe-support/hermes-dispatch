@@ -61,7 +61,7 @@ def main():
             with patch.object(config,'save_config',side_effect=OSError('synthetic write failure')):
                 await command(a,'/model model-unsaved --global')
             assert resolved(a)=='model-unsaved'
-            assert yaml.safe_load(path.read_text())['model']['default']=='model-b'
+            assert yaml.safe_load(path.read_text(encoding='utf-8'))['model']['default']=='model-b'
             # A deferred confirmation must retain the global scope, including cancellation.
             saved={}
             async def confirm(self,**kw):saved['handler']=kw['handler'];return 'confirm'
