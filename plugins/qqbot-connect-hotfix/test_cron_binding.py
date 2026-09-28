@@ -76,18 +76,19 @@ print(json.dumps(jobs.create_job(prompt='test', schedule='30m', deliver='qqbot')
         cli_job = [j for j in jobs.load_jobs() if j['prompt'] == 'cli-test'][-1]
         assert cli_job['deliver'] == created['deliver']
         assert binding.binding_target(cli_job) == binding.binding_target(created)
-        launcher = shutil.which('hermes', path=agent.child_env['PATH'])
-        assert Path(launcher).parent == launchers
-        installed = subprocess.run([sys.executable, str(installer), '--home', str(home), '--launcher', launcher],
-            capture_output=True, text=True, timeout=30)
-        assert installed.returncode == 0, installed.stderr
-        assert Path(launcher).stat().st_mode & 0o777 == 0o700
-        wrapped = subprocess.run([launcher, 'cron', 'create', '30m', 'launcher-test',
-                                  '--deliver', 'qqbot', '--repeat', '1'],
-            env=agent.child_env, text=True, capture_output=True, timeout=30)
-        assert wrapped.returncode == 0, wrapped.stdout + wrapped.stderr
-        launcher_job = [j for j in jobs.load_jobs() if j['prompt'] == 'launcher-test'][-1]
-        assert binding.binding_target(launcher_job) == binding.binding_target(created)
+        if os.name != 'nt':  # generated POSIX shell wrapper; native CLI above runs everywhere
+            launcher = shutil.which('hermes', path=agent.child_env['PATH'])
+            assert Path(launcher).parent == launchers
+            installed = subprocess.run([sys.executable, str(installer), '--home', str(home), '--launcher', launcher],
+                capture_output=True, text=True, timeout=30)
+            assert installed.returncode == 0, installed.stderr
+            assert Path(launcher).stat().st_mode & 0o777 == 0o700
+            wrapped = subprocess.run([launcher, 'cron', 'create', '30m', 'launcher-test',
+                                      '--deliver', 'qqbot', '--repeat', '1'],
+                env=agent.child_env, text=True, capture_output=True, timeout=30)
+            assert wrapped.returncode == 0, wrapped.stdout + wrapped.stderr
+            launcher_job = [j for j in jobs.load_jobs() if j['prompt'] == 'launcher-test'][-1]
+            assert binding.binding_target(launcher_job) == binding.binding_target(created)
         custom = home / 'python-customization'
         custom.mkdir(exist_ok=True)
         (custom / 'sitecustomize.py').write_text("import os\nos.environ['QQ_BOOTSTRAP_CHAIN_TEST']='preserved'\n")
@@ -113,6 +114,15 @@ print(json.dumps(jobs.create_job(prompt='test', schedule='30m', deliver='qqbot')
          patch.object(CodexAppServerClient, '__init__', client_init):
         plugin.register(None)
         binding = plugin.cron_binding
+        # Owner validation must never signal the Gateway, especially on Windows.
+        pointer = home / 'cron' / 'qq-context' / 'owner-test.json'
+        pointer.parent.mkdir(parents=True, exist_ok=True)
+        pointer.write_text(json.dumps({'gateway_pid': os.getpid(), 'source': {'chat_id': 'test'}}))
+        with patch.dict(os.environ, {binding.CONTEXT_ENV: str(pointer)}), patch(
+            'gateway.status._pid_exists', return_value=True
+        ), patch.object(binding.os, 'kill', side_effect=AssertionError('owner probe sent a signal')):
+            assert binding._current_request()['gateway_pid'] == os.getpid()
+        pointer.unlink()
         assert cronjob_tools.update_job is jobs.update_job
         assert getattr(jobs.create_job, '_qq_cron_binding_wrapped', False)
         (home / 'channel_directory.json').write_text(json.dumps({'platforms': {'qqbot': [
@@ -255,11 +265,12 @@ print(json.dumps(jobs.create_job(prompt='test', schedule='30m', deliver='qqbot')
         assert len(envs) == 1, 'test must reuse the persistent Codex child environment'
         assert not agent._qq_cron_context_path.exists()
         assert not list((home / 'cron' / 'qq-context').glob('*.json'))
-        removed = subprocess.run([sys.executable, str(installer), '--home', str(home),
-                                  '--launcher', str(launcher), '--remove'],
-            capture_output=True, text=True, timeout=30)
-        assert removed.returncode == 0, removed.stderr
-        assert launcher.read_text() == original_launcher
+        if os.name != 'nt':
+            removed = subprocess.run([sys.executable, str(installer), '--home', str(home),
+                                      '--launcher', str(launcher), '--remove'],
+                capture_output=True, text=True, timeout=30)
+            assert removed.returncode == 0, removed.stderr
+            assert launcher.read_text() == original_launcher
 
         # Native cron tool (not only low-level storage) sees the same binding.
         with incoming(chat='tool-private', kind='dm'):

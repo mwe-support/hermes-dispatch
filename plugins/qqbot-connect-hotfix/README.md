@@ -1157,3 +1157,15 @@ received in QQ. Model defaults were restored to their initial values. Four
 historical global pins were confirmed against original commands and cleared:
 two in procurement, one local, and one operations. Explicit session behavior is
 covered by the native-handler regression and is not globally reset.
+
+
+## Windows cron context owner probe (1.8.37)
+
+QQ cron context validation now uses Hermes' native cross-platform PID probe.
+`os.kill(pid, 0)` is not a safe existence check on Windows and can signal the
+owner's process group. The native helper uses the platform's non-signalling
+process query and still rejects expired owners. No core source changes are
+needed; update this plugin and restart the idle Gateway. The cron-binding
+regression rejects any direct signal probe and retains native CLI/child-process
+coverage on Windows; only the POSIX generated-shell launcher case is platform
+specific. Rollback uses the plugin backup printed by the installer/updater.

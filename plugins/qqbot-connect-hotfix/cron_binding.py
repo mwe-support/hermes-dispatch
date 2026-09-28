@@ -139,10 +139,9 @@ def _current_request():
             pid = request.get('gateway_pid')
             if not isinstance(pid, int) or pid <= 0:
                 raise ValueError('missing Gateway owner')
-            try:
-                os.kill(pid, 0)
-            except PermissionError:
-                pass  # An existing owner can be invisible to a tool sandbox.
+            from gateway.status import _pid_exists
+            if not _pid_exists(pid):
+                raise ValueError('Gateway owner is no longer running')
             return request
         except (OSError, ValueError) as exc:
             raise ValueError('QQ cron binding: creating QQ turn is no longer active') from exc

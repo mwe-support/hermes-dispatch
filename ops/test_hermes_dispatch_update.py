@@ -360,7 +360,7 @@ class UpdaterTests(unittest.TestCase):
 
     def test_readiness_rejects_stale_pid_and_lost_api(self) -> None:
         previous = {"pid": 11, "platforms": {"api_server": {"state": "connected"}}}
-        for pid, api in [(11, "connected"), (22, "fatal")]:
+        for pid, api in [(None, "connected"), (11, "connected"), (22, "fatal")]:
             current = {"pid": pid, "gateway_state": "running", "platforms": {
                 "qqbot": {"state": "connected"}, "api_server": {"state": api}}}
             with patch.object(ops, "read_gateway_state", return_value=current), patch.object(

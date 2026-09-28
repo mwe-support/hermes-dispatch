@@ -74,7 +74,7 @@ def main():
                 shutil.copytree(Path(__file__).resolve().parent.parent / name, home / "plugins" / name,
                                 ignore=shutil.ignore_patterns("__pycache__"))
             (home / "config.yaml").write_text("plugins:\n  enabled:\n" + "".join(f"    - {n}\n" for n in names))
-            env = {k: v for k, v in os.environ.items() if k in {"PATH", "SYSTEMROOT", "WINDIR", "LANG"}}
+            env = {k: v for k, v in os.environ.items() if k in {"PATH", "SYSTEMROOT", "WINDIR", "LANG", "USERPROFILE", "HOMEDRIVE", "HOMEPATH", "LOCALAPPDATA", "APPDATA", "TEMP", "TMP", "COMSPEC", "PATHEXT"}}
             env.update(HOME=tmp, HERMES_HOME=str(home), CODEX_HOME=str(Path(tmp, "codex")),
                        PYTHONPATH=str(root), HERMES_SAFE_MODE="0",
                        HERMES_CODEX_SESSION_PROJECTS_BACKFILL="false", HERMES_CODEX_APP_REGISTER_PROJECTS="false")

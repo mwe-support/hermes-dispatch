@@ -679,7 +679,7 @@ def wait_for_ready(home: Path, previous: dict[str, Any], require_qq: bool, timeo
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         current = read_gateway_state(home)
-        if (current.get("pid") != previous.get("pid") and gateway_running(current)
+        if (current.get("pid") and current.get("pid") != previous.get("pid") and gateway_running(current)
                 and all(current.get("platforms", {}).get(name, {}).get("state") == "connected"
                         for name in required)):
             return True
