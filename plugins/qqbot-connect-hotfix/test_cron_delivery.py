@@ -1,6 +1,7 @@
 """Real scheduler -> DeliveryRouter -> QQAdapter; replace only the QQ wire."""
 import asyncio
 import base64
+from contextlib import nullcontext
 import importlib.util
 import json
 import os
@@ -331,8 +332,17 @@ print('no-agent route probe; manual QQ send blocked')
 
 async def main():
     plugin = load_plugin()
-    for chat_type in sys.argv[1:] or ('group', 'c2c', 'dm'):
-        await check_route(plugin, chat_type)
+    # Reproduce the native Windows uv overlay on POSIX too: upstream applies
+    # it after build_subprocess_env, so it must retain the QQ bootstrap path.
+    with tempfile.TemporaryDirectory() as tmp:
+        site = Path(tmp, 'Lib', 'site-packages')
+        site.mkdir(parents=True)
+        overlay = {'VIRTUAL_ENV': tmp, 'PYTHONPATH': str(site)}
+        native = nullcontext() if os.name == 'nt' else patch.object(
+            scheduler, '_windows_cron_python_invocation', return_value=(sys.executable, overlay))
+        with native:
+            for chat_type in sys.argv[1:] or ('group', 'c2c', 'dm'):
+                await check_route(plugin, chat_type)
 
 
 if __name__ == '__main__':

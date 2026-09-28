@@ -1169,3 +1169,11 @@ needed; update this plugin and restart the idle Gateway. The cron-binding
 regression rejects any direct signal probe and retains native CLI/child-process
 coverage on Windows; only the POSIX generated-shell launcher case is platform
 specific. Rollback uses the plugin backup printed by the installer/updater.
+
+
+Windows uv cron execution applies a venv environment overlay after the normal
+subprocess environment builder. Version 1.8.37 preserves the QQ bootstrap in
+that final overlay, retaining the original venv site-packages and `.pth`
+processing. Without this wrapper, no-agent jobs lost their extra-send guard.
+`test_cron_delivery.py` replays the Windows overlay on POSIX and exercises the
+real Windows path natively, while keeping external network calls forbidden.
