@@ -536,3 +536,39 @@ For HTTP MCP:
 python mcp/http-gateway/test_hermes_mcp_http_auth.py
 python mcp/http-gateway/test_hermes_mcp_qqbot_target_patch.py
 ```
+
+
+### Remote CLI and restart compatibility (2026-09-28)
+
+The updater invokes Python-form Hermes launchers with the installation's venv
+interpreter. This fixes plain SSH sessions whose PATH lacks `hermes` and would
+otherwise run the checkout launcher under macOS system Python 3.9, or try to
+execute a Python file directly on Windows. Native executable/shell launchers
+retain their normal command form.
+
+A cached `last_tested_commit` no longer bypasses current CLI/version validation
+or regressions when changes are pending. Dry-run completion explicitly reports
+preflight success, not that an update was applied. Busy profiles still defer.
+
+For a running Gateway, the updater waits for its old PID to exit and its API
+address to become bindable before restart. It requires a fresh live PID plus
+reconnection of previously connected platforms (and enabled QQ), rather than a
+literal `Ready` log. QQ `Resumed` is valid; a stale PID or a lost API listener is
+not. Rollback preserves the same original platform requirements.
+
+The normal one-command entrypoints enable this behavior automatically after
+publication to main; no scheduler or Hermes core changes are required. Verify
+with `--dry-run` / `-DryRun`, then an idle `--apply` run, profile state/PID,
+platform health and before/after business configuration hashes. Tests are in
+`ops/test_hermes_dispatch_update.py`, including actual Python-launcher execution,
+stale-cache rejection, resumed connectivity, port rebinding and rollback.
+Rollback uses the profile's recorded `update-backups` snapshot and its original
+Gateway service. Restore the previous updater script/ref separately if needed.
+
+A venv whose uv trampoline points to a deleted base interpreter must be repaired
+before this Python updater can start. On Windows, install a user-owned Python
+of the same minor version, back up venv startup files, then use uv's native
+`venv --allow-existing --python <base> <venv>` mode and verify dependency hashes
+and `hermes --version`. This preserves packages; do not use `--clear` or change
+execution policy to mask a missing interpreter. See the official
+[uv Python guide](https://docs.astral.sh/uv/guides/install-python/).

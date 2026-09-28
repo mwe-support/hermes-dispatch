@@ -56,6 +56,14 @@ def make_fixture_repo(base: Path) -> Path:
 
 
 class UpdaterTests(unittest.TestCase):
+    def test_python_cli_uses_hermes_interpreter_not_shebang(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            cli = Path(tmp) / "hermes"
+            cli.write_text("#!/missing/system/python3\nprint('Hermes Agent v0.20.5')\n")
+            cli.chmod(0o755)
+            with patch.object(ops, "hermes_python", return_value=sys.executable):
+                self.assertEqual(ops.hermes_version(str(cli), "default"), (0, 20, 5))
+
     def test_native_profile_paths(self) -> None:
         home = Path("/Users/team")
         self.assertEqual(
@@ -262,6 +270,19 @@ class UpdaterTests(unittest.TestCase):
             self.assertFalse((home / "plugins/sample").exists())
             state = json.loads((home / "state/hermes-dispatch-update.json").read_text())
             self.assertEqual(state["last_result"], "dry-run-passed")
+            # A prior passing commit does not validate today's interpreter.
+            with patch.object(ops, "profile_home", return_value=home), patch.object(
+                ops, "hermes_version", side_effect=ops.UpdateError("broken interpreter")
+            ), patch.object(ops, "desired_state_drift", return_value=[]):
+                with self.assertRaisesRegex(ops.UpdateError, "broken interpreter"):
+                    ops.perform_update(args)
+            with patch.object(ops, "profile_home", return_value=home), patch.object(
+                ops, "hermes_version", return_value=(0, 20, 5)
+            ), patch.object(ops, "desired_state_drift", return_value=[]), patch.object(
+                ops, "run_regressions"
+            ) as regression:
+                self.assertEqual(ops.perform_update(args)["status"], "dry-run-passed")
+                regression.assert_called_once()
 
     def test_failed_apply_restores_plugin_and_blocks_commit(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -297,6 +318,55 @@ class UpdaterTests(unittest.TestCase):
             state = json.loads((home / "state/hermes-dispatch-update.json").read_text())
             self.assertEqual(state["last_result"], "rolled-back")
             self.assertEqual(len(state["blocked_commit"]), 40)
+
+    def test_live_update_accepts_fresh_connected_gateway_without_ready_log(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp); source = make_fixture_repo(base); home = base / "home"
+            home.mkdir(); write_plugin(home, "sample", "1", "old")
+            (home / "logs").mkdir()
+            (home / "logs/gateway.log").write_text("QQ Resumed\n")
+            state = {"gateway_state": "running", "pid": 11,
+                     "platforms": {"qqbot": {"state": "connected"}}}
+            def cli(_hermes, _profile, *args, **kwargs):
+                if args == ("gateway", "stop"):
+                    state["gateway_state"] = "stopped"
+                elif args == ("gateway", "start"):
+                    state.update(gateway_state="running", pid=22)
+                return subprocess.CompletedProcess([], 0, "", "")
+            args = argparse.Namespace(profile="default", remote=str(source), ref="main",
+                hermes_cli=sys.executable, git_cli=shutil_which_git(), health_timeout=.01,
+                apply=True, retry_blocked=False)
+            with patch.object(ops, "profile_home", return_value=home), patch.object(
+                ops, "hermes_version", return_value=(0, 20, 5)
+            ), patch.object(ops, "desired_state_drift", return_value=[]), patch.object(
+                ops, "run_regressions"
+            ), patch.object(ops, "apply_managed_settings"), patch.object(
+                ops, "qqbot_enabled", return_value=True
+            ), patch.object(ops, "read_gateway_state", side_effect=lambda _: dict(state)), patch.object(
+                ops, "process_alive", side_effect=lambda pid: state["gateway_state"] == "running" and pid == state["pid"]
+            ), patch.object(ops, "hermes_call", side_effect=cli):
+                self.assertEqual(ops.perform_update(args)["status"], "updated")
+            self.assertEqual((home / "plugins/sample/runtime.py").read_text(), "new")
+
+    def test_stop_waits_until_api_socket_can_rebind(self) -> None:
+        previous = {"pid": 11, "platforms": {"api_server": {"state": "connected"}}}
+        with patch.object(ops, "process_alive", return_value=False), patch.object(
+            ops, "api_bind_address", return_value=("127.0.0.1", 8642)
+        ), patch.object(ops.socket, "socket") as factory, patch.object(ops.time, "sleep"):
+            probe = factory.return_value.__enter__.return_value
+            probe.bind.side_effect = [OSError("address in use"), None]
+            ops.wait_for_stopped(Path("unused"), previous, 1)
+            self.assertEqual(probe.bind.call_count, 2)
+
+    def test_readiness_rejects_stale_pid_and_lost_api(self) -> None:
+        previous = {"pid": 11, "platforms": {"api_server": {"state": "connected"}}}
+        for pid, api in [(11, "connected"), (22, "fatal")]:
+            current = {"pid": pid, "gateway_state": "running", "platforms": {
+                "qqbot": {"state": "connected"}, "api_server": {"state": api}}}
+            with patch.object(ops, "read_gateway_state", return_value=current), patch.object(
+                ops, "process_alive", return_value=True
+            ), patch.object(ops.time, "sleep"), patch.object(ops.time, "monotonic", side_effect=[0,0,2]):
+                self.assertFalse(ops.wait_for_ready(Path("unused"), previous, True, 1))
 
     def test_active_profile_defers_before_regressions(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

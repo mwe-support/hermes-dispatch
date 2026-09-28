@@ -19,6 +19,7 @@ import os
 import plistlib
 import re
 import shutil
+import socket
 import stat
 import subprocess
 import sys
@@ -327,8 +328,22 @@ def remove_checkout(git: str, update_root: Path, checkout: Path) -> None:
     shutil.rmtree(checkout, ignore_errors=True)
 
 
+def hermes_argv(hermes: str, profile: str, *args: str) -> list[str]:
+    # The checkout launcher is Python, not an executable on Windows. On
+    # macOS its /usr/bin/env shebang can pick system Python over the venv.
+    path = Path(hermes)
+    header = b""
+    if path.is_file():
+        with path.open("rb") as handle:
+            header = handle.read(256).split(b"\n", 1)[0]
+    prefix = [hermes_python(profile_home(profile))] if (
+        path.suffix == ".py" or header.startswith(b"#!") and b"python" in header
+    ) else []
+    return [*prefix, hermes, "-p", profile, *args]
+
+
 def hermes_version(hermes: str, profile: str) -> tuple[int, int, int]:
-    output = run([hermes, "-p", profile, "--version"], timeout=30).stdout
+    output = run(hermes_argv(hermes, profile, "--version"), timeout=30).stdout
     match = VERSION_RE.search(output)
     if not match:
         raise UpdateError(f"could not parse Hermes version from: {output!r}")
@@ -439,7 +454,7 @@ def gateway_running(state: dict[str, Any]) -> bool:
 
 def qqbot_enabled(hermes: str, profile: str) -> bool:
     result = run(
-        [hermes, "-p", profile, "config", "get", "platforms.qqbot.enabled"],
+        hermes_argv(hermes, profile, "config", "get", "platforms.qqbot.enabled"),
         check=False,
         timeout=30,
     )
@@ -561,7 +576,7 @@ def restore_backup(home: Path, backup: Path, metadata: dict[str, Any]) -> None:
 
 
 def hermes_call(hermes: str, profile: str, *args: str, timeout: float = 120) -> subprocess.CompletedProcess[str]:
-    return run([hermes, "-p", profile, *args], timeout=timeout)
+    return run(hermes_argv(hermes, profile, *args), timeout=timeout)
 
 
 def expected_config_text(value: Any) -> str:
@@ -578,17 +593,17 @@ def desired_state_drift(
 ) -> list[str]:
     drift: list[str] = []
     for key, expected in manifest["config_set"].items():
-        result = run([hermes, "-p", profile, "config", "get", key], check=False, timeout=30)
+        result = run(hermes_argv(hermes, profile, "config", "get", key), check=False, timeout=30)
         if result.returncode or result.stdout.strip() != expected_config_text(expected):
             drift.append(f"config:{key}")
     for key in env_missing(home / ".env", manifest["env_set_if_missing"]):
         drift.append(f"env:{key}")
     for plugin in manifest["enable_plugins"]:
-        result = run([hermes, "-p", profile, "plugins", "show", plugin], check=False, timeout=30)
+        result = run(hermes_argv(hermes, profile, "plugins", "show", plugin), check=False, timeout=30)
         if result.returncode or "Status: enabled" not in result.stdout:
             drift.append(f"plugin:{plugin}")
     tool_result = run(
-        [hermes, "-p", profile, "tools", "list", "--platform", "qqbot"],
+        hermes_argv(hermes, profile, "tools", "list", "--platform", "qqbot"),
         check=False,
         timeout=60,
     )
@@ -619,20 +634,56 @@ def apply_managed_settings(
     hermes_call(hermes, profile, "config", "check")
 
 
-def wait_for_ready(log_path: Path, offset: int, timeout: float) -> bool:
+def api_bind_address(home: Path) -> tuple[str, int]:
+    # Ask Hermes to resolve its own profile/env precedence; emit no credentials.
+    script = """import json,os
+from pathlib import Path
+from hermes_cli.env_loader import load_hermes_dotenv
+load_hermes_dotenv(hermes_home=Path(os.environ['HERMES_HOME']))
+from gateway.config import load_gateway_config,Platform
+p=load_gateway_config().platforms.get(Platform('api_server'))
+e=p.extra if p else {}
+print(json.dumps([e.get('host',os.getenv('API_SERVER_HOST','127.0.0.1')),int(e.get('port') or os.getenv('API_SERVER_PORT','8642'))]))
+"""
+    env = {**os.environ, "HERMES_HOME": str(home),
+           "PYTHONPATH": str(installation_root(home) / "hermes-agent")}
+    address = json.loads(run([hermes_python(home), "-c", script], env=env).stdout)
+    return str(address[0]), int(address[1])
+
+
+def wait_for_stopped(home: Path, previous: dict[str, Any], timeout: float) -> None:
+    address = None
+    if previous.get("platforms", {}).get("api_server", {}).get("state") == "connected":
+        address = api_bind_address(home)
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
-        try:
-            size = log_path.stat().st_size
-            if size < offset:
-                offset = 0
-            with log_path.open("r", encoding="utf-8", errors="replace") as handle:
-                handle.seek(offset)
-                if any("Ready" in line for line in handle):
-                    return True
-        except FileNotFoundError:
-            pass
-        time.sleep(1)
+        if not process_alive(previous.get("pid")):
+            if address:
+                family = socket.AF_INET6 if ":" in address[0] else socket.AF_INET
+                with socket.socket(family, socket.SOCK_STREAM) as probe:
+                    try:
+                        probe.bind(address)  # no SO_REUSEADDR: match Hermes' listener
+                    except OSError:
+                        time.sleep(.5)
+                        continue
+            return
+        time.sleep(.5)
+    raise UpdateError("old Gateway process or API port was not released")
+
+
+def wait_for_ready(home: Path, previous: dict[str, Any], require_qq: bool, timeout: float) -> bool:
+    required = {name for name, value in previous.get("platforms", {}).items()
+                if value.get("state") == "connected"}
+    if require_qq:
+        required.add("qqbot")
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        current = read_gateway_state(home)
+        if (current.get("pid") != previous.get("pid") and gateway_running(current)
+                and all(current.get("platforms", {}).get(name, {}).get("state") == "connected"
+                        for name in required)):
+            return True
+        time.sleep(.5)
     return False
 
 
@@ -671,26 +722,6 @@ def perform_update(args: argparse.Namespace) -> dict[str, Any]:
             digest = manifest_digest(manifest)
             if state.get("blocked_commit") == commit and not args.retry_blocked:
                 return {"status": "blocked", "commit": commit, "reason": state.get("blocked_reason")}
-            changed = plugin_differences(checkout, home, manifest["plugins"])
-            manifest_changed = state.get("manifest_digest") != digest
-            drift = desired_state_drift(hermes, args.profile, home, manifest)
-            if not args.apply and state.get("last_tested_commit") == commit:
-                return {
-                    "status": "already-tested",
-                    "commit": commit,
-                    "plugins": changed,
-                    "state_drift": drift,
-                }
-            if not changed and not manifest_changed and not drift:
-                save_state(
-                    state_path,
-                    state,
-                    applied_commit=commit,
-                    last_seen_commit=commit,
-                    last_result="no-live-change",
-                )
-                return {"status": "no-live-change", "commit": commit}
-
             gateway: dict[str, Any] = {}
             if args.apply:
                 gateway = read_gateway_state(home)
@@ -721,6 +752,19 @@ def perform_update(args: argparse.Namespace) -> dict[str, Any]:
                     last_result="blocked_by_hermes_version",
                 )
                 return {"status": "blocked_by_hermes_version", "commit": commit, "reason": reason}
+
+            changed = plugin_differences(checkout, home, manifest["plugins"])
+            manifest_changed = state.get("manifest_digest") != digest
+            drift = desired_state_drift(hermes, args.profile, home, manifest)
+            if not changed and not manifest_changed and not drift:
+                save_state(
+                    state_path,
+                    state,
+                    applied_commit=commit,
+                    last_seen_commit=commit,
+                    last_result="no-live-change",
+                )
+                return {"status": "no-live-change", "commit": commit}
 
             try:
                 run_regressions(checkout, home, manifest, git)
@@ -757,13 +801,10 @@ def perform_update(args: argparse.Namespace) -> dict[str, Any]:
             preflight_active_plugins(home, changed)
             backup, metadata = backup_live_state(home, changed, commit)
             stage = stage_plugins(checkout, home, changed, commit)
-            log_path = home / "logs" / "gateway.log"
-            log_offset = log_path.stat().st_size if log_path.exists() else 0
-            stopped = False
             try:
                 if was_running:
                     hermes_call(hermes, args.profile, "gateway", "stop", timeout=360)
-                    stopped = True
+                    wait_for_stopped(home, gateway, args.health_timeout)
                 replace_plugins(home, stage, changed)
                 apply_managed_settings(hermes, args.profile, home, manifest)
                 for plugin in manifest["plugins"]:
@@ -773,9 +814,8 @@ def perform_update(args: argparse.Namespace) -> dict[str, Any]:
                         raise UpdateError(f"installed plugin hash mismatch: {plugin}")
                 if was_running:
                     hermes_call(hermes, args.profile, "gateway", "start", timeout=60)
-                    stopped = False
-                    if require_qq_ready and not wait_for_ready(log_path, log_offset, args.health_timeout):
-                        raise UpdateError("Gateway restarted but QQ Ready was not observed")
+                    if not wait_for_ready(home, gateway, require_qq_ready, args.health_timeout):
+                        raise UpdateError("new Gateway did not restore its connected platforms")
                     hermes_call(hermes, args.profile, "gateway", "status", "--deep", timeout=60)
                 save_state(
                     state_path,
@@ -794,7 +834,8 @@ def perform_update(args: argparse.Namespace) -> dict[str, Any]:
                 return {"status": "updated", "commit": commit, "plugins": changed, "backup": str(backup)}
             except Exception as exc:
                 rollback_errors: list[str] = []
-                if was_running and not stopped:
+                recovery = {**gateway, "pid": read_gateway_state(home).get("pid")} if was_running else {}
+                if was_running:
                     try:
                         hermes_call(hermes, args.profile, "gateway", "stop", timeout=360)
                     except Exception as rollback_exc:
@@ -805,9 +846,10 @@ def perform_update(args: argparse.Namespace) -> dict[str, Any]:
                     rollback_errors.append(f"restore: {rollback_exc}")
                 if was_running:
                     try:
+                        wait_for_stopped(home, recovery, args.health_timeout)
                         hermes_call(hermes, args.profile, "gateway", "start", timeout=60)
-                        if require_qq_ready and not wait_for_ready(log_path, log_offset, args.health_timeout):
-                            rollback_errors.append("restored Gateway did not reach QQ Ready")
+                        if not wait_for_ready(home, recovery, require_qq_ready, args.health_timeout):
+                            rollback_errors.append("restored Gateway did not reconnect")
                     except Exception as rollback_exc:
                         rollback_errors.append(f"start: {rollback_exc}")
                 reason = str(exc)

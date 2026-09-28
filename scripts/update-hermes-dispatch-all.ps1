@@ -138,7 +138,8 @@ try {
     Write-Host "`nCommit: $Commit"
     Write-Host "Updated: $(if ($Updated.Count) { $Updated -join ' ' } else { '(none)' })"
     if ($Failures.Count) { throw "Failed/deferred: $($Failures -join ' ')" }
-    Write-Host "All Hermes profiles are current."
+    if ($DryRun) { Write-Host "Preflight passed for all Hermes profiles; no live changes applied." }
+    else { Write-Host "All Hermes profiles are current." }
 } finally {
     if ($TempRoot -and (Test-Path -LiteralPath $TempRoot)) {
         Remove-Item -LiteralPath $TempRoot -Recurse -Force
