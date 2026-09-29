@@ -27,10 +27,13 @@ def load_plugin_module():
 
 mod = load_plugin_module()
 
+ISSUE18_ERROR = "QQ Bot API error [400]: msgid已经过期,不能回复"
+
 
 class DummyAdapter:
     def __init__(self):
         self.calls = []
+        self.result_error = False
 
     async def _send_c2c_text(
         self, target_id, content, reply_to=None, keyboard=None
@@ -45,7 +48,9 @@ class DummyAdapter:
     ):
         self.calls.append(("group", target_id, content, reply_to, keyboard))
         if reply_to:
-            raise RuntimeError("QQ Bot API error: message_id expired")
+            if self.result_error:
+                return SimpleNamespace(success=False, error=ISSUE18_ERROR)
+            raise RuntimeError(ISSUE18_ERROR)
         return SimpleNamespace(success=True, message_id="group-standalone")
 
     async def _send_guild_text(self, target_id, content, reply_to=None):
@@ -83,7 +88,7 @@ class WindowsPassiveRetryAdapter(DummyAdapter):
     async def _native_group_text(self, target_id, content, reply_to=None, keyboard=None):
         self.calls.append(("group", target_id, content, reply_to, keyboard))
         if reply_to:
-            raise RuntimeError("回复消息msg_id已过期")
+            raise RuntimeError(ISSUE18_ERROR)
         raise RuntimeError("主动消息失败, 无权限")
 
     async def _send_group_text(self, target_id, content, reply_to=None, keyboard=None):
@@ -119,8 +124,8 @@ class ComposedGroupAdapter:
                 self._last_msg_id[target_id] = "newer"
                 self._qq_group_reply_seen[target_id] = ("newer", time.time())
             if self.result_error:
-                return SimpleNamespace(success=False, error="回复消息msg_id已过期")
-            raise RuntimeError("回复消息msg_id已过期")
+                return SimpleNamespace(success=False, error=ISSUE18_ERROR)
+            raise RuntimeError(ISSUE18_ERROR)
         if reply_to in {"recent", "newer"}:
             return SimpleNamespace(success=True)
         raise RuntimeError("主动消息失败, 无权限")
@@ -132,15 +137,18 @@ async def main():
     mod._patch_expired_reply_fallback(DummyAdapter)
 
     keyboard = object()
-    adapter = DummyAdapter()
-    result = await adapter._send_group_text(
-        "group-1", "approve?", "expired-1", keyboard
-    )
-    assert result.success
-    assert adapter.calls == [
-        ("group", "group-1", "approve?", "expired-1", keyboard),
-        ("group", "group-1", "approve?", None, keyboard),
-    ]
+    for result_error in (False, True):
+        for group_keyboard in (None, keyboard):
+            adapter = DummyAdapter()
+            adapter.result_error = result_error
+            result = await adapter._send_group_text(
+                "group-1", "final answer", "expired-1", group_keyboard
+            )
+            assert result.success
+            assert adapter.calls == [
+                ("group", "group-1", "final answer", "expired-1", group_keyboard),
+                ("group", "group-1", "final answer", None, group_keyboard),
+            ]
 
     c2c = DummyAdapter()
     result = await c2c._send_c2c_text("user-1", "done", "expired-2")
@@ -172,6 +180,20 @@ async def main():
         assert "msg_id expired" in text
     else:
         raise AssertionError("fallback failure must preserve both diagnostics")
+
+    calls = []
+    denial = SimpleNamespace(success=False, error="主动消息失败, 无权限")
+
+    async def rejected_send(anchor):
+        calls.append(anchor)
+        return SimpleNamespace(success=False, error=ISSUE18_ERROR) if anchor else denial
+
+    from importlib import import_module
+    outbound = import_module(mod.__package__ + ".outbound")
+    assert await outbound._send_with_expired_reply_fallback(
+        rejected_send, reply_to="expired", log_tag="group", send_kind="group"
+    ) is denial
+    assert calls == ["expired", None]
 
     # Match register(): the Windows passive retry is the inner sender, then
     # plain-text compatibility and expired-reply fallback wrap it in order.
@@ -243,13 +265,19 @@ async def main():
     assert [call[1] for call in newer.calls] == ["expired", None, None, "newer"]
 
     for message in (
+        ISSUE18_ERROR,
+        "MSGID already expired",
         "回复消息msg_id已过期",
         "msg_id expired",
         "message_id has expired",
         "message id expiration",
     ):
         assert mod._is_expired_reply_error(message), message
-    for message in ("msg_id missing", "message id invalid", "request expired"):
+    for message in (
+        "msg_id missing", "msgid missing", "message id invalid", "request expired",
+        "QQ Bot API error [400]: invalid request",
+        "QQ Bot API error [400]: 主动消息失败, 无权限",
+    ):
         assert not mod._is_expired_reply_error(message), message
 
     print("expired_reply_group_fallback=ok")
