@@ -69,14 +69,14 @@ def _recent_group_reply_anchor(adapter: Any, chat_id: str) -> str:
 def is_expired_reply_error(error: object) -> bool:
     """Return whether QQ rejected an expired reply message anchor.
 
-    QQ currently reports Chinese errors such as ``msg_id已过期``.  Keep
+    QQ reports Chinese errors such as ``msg_id已过期`` or ``msgid已经过期``. Keep
     conservative English aliases as gateways and SDK layers sometimes render
     the same field as ``message_id`` or ``message id``.
     """
 
     text = str(error or "").lower()
     has_reply_id = any(
-        marker in text for marker in ("msg_id", "message_id", "message id")
+        marker in text for marker in ("msg_id", "msgid", "message_id", "message id")
     )
     has_expiry = any(
         marker in text for marker in ("expired", "expire", "expiration", "过期")

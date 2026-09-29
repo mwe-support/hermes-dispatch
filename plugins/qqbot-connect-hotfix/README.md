@@ -24,6 +24,31 @@ structured self-mention gating, emoji-only group mentions, reply `msg_id`
 handling, native C2C streaming, bounded input notifications, markdown fallback,
 and media caption compatibility.
 
+Version 1.8.38 fixes [Issue #18](https://github.com/mwe-support/hermes-dispatch/issues/18):
+QQ also reports an expired anchor as `msgid已经过期,不能回复`, without the
+underscore in `msg_id`. Hermes 0.20.5 forwards this API message verbatim, but
+our detector previously missed it and never entered the standalone fallback.
+The shared detector now accepts `msgid` alongside the existing spellings,
+still requiring an explicit expiry marker. Both raised errors and failed
+`SendResult.error` values use the same check. Group text and keyboards retain
+their exact payload, retry without the anchor at most once, and retain the
+Issue #10 protection against reattaching a rejected ID. Unrelated HTTP 400
+errors do not trigger this retry, and a rejected standalone attempt remains a
+failure with its platform error.
+
+No configuration key is added. Install the persistent plugin with
+`scripts/install-plugins.sh <hermes-home> qqbot-connect-hotfix`, then restart
+only that Gateway. Run `test_expired_reply.py` and the existing media/final
+regressions; live acceptance must show the standalone retry and the actual
+QQ receipt or permission denial for a group reply past five minutes. The
+[official QQ send contract](https://github.com/tencent-connect/bot-docs/blob/main/docs/develop/api-v2/server-inter/message/send-receive/send.md)
+limits group passive replies to five minutes and announces withdrawal of
+proactive push support. Recognizing expiry therefore does not guarantee that
+QQ permits the standalone send. Do not mark delivery successful from the
+retry log alone. Restore the installer's pre-update plugin backup and restart
+the same Gateway to roll back; this removes the `msgid` spelling fix while
+preserving unrelated profile settings.
+
 Version 1.8.28 resolves [Issue #10](https://github.com/mwe-support/hermes-dispatch/issues/10)
 for Windows group text. Hermes 0.20.5 keeps only the last inbound `msg_id`, and
 the Windows proactive-denial wrapper could reattach that cached ID after QQ had
