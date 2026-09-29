@@ -1,5 +1,5 @@
 name: dashboard-profile-logs
-version: 1.0.0
+version: 1.0.1
 description: "Removable Dashboard log viewer scoped to the selected Hermes profile."
 author: local
 kind: standalone

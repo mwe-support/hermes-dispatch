@@ -16,13 +16,18 @@
     const [error, setError] = useState("");
     const [loading, setLoading] = useState(true);
     const scroll = useRef(null);
+    const inFlight = useRef(false);
+
+    useEffect(() => {
+      setResult({ lines: [], profile: "" });
+    }, [file, level, component, limit]);
 
     useEffect(() => {
       let disposed = false;
       const controller = new AbortController();
+      inFlight.current = true;
       setLoading(true);
       setError("");
-      setResult({ lines: [], profile: "" });
       // The native ProfileProvider synchronizes the URL in its parent effect.
       // Read after that commit; its ProfileKeyedRoutes remounts this page on switch.
       Promise.resolve().then(() => {
@@ -37,14 +42,16 @@
       }).catch((failure) => {
         if (!disposed) setError(String(failure));
       }).finally(() => {
-        if (!disposed) setLoading(false);
+        if (!disposed) { inFlight.current = false; setLoading(false); }
       });
       return () => { disposed = true; controller.abort(); };
     }, [file, level, component, limit, revision]);
 
     useEffect(() => {
       if (!automatic) return;
-      const timer = setInterval(() => refresh((n) => n + 1), 5000);
+      const timer = setInterval(() => {
+        if (!inFlight.current) refresh((n) => n + 1);
+      }, 5000);
       return () => clearInterval(timer);
     }, [automatic]);
     useEffect(() => {

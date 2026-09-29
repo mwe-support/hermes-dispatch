@@ -19,8 +19,10 @@ with tempfile.TemporaryDirectory(prefix="dashboard-profile-logs-test-") as temp:
         (home / "config.yaml").write_text(f"plugins:\n  enabled: [{name}]\n")
         for file in ("agent", "errors", "gateway"):
             (home / "logs" / (file + ".log")).write_text(
-                f"2026-09-29 12:00:00 [INFO] {profile}-{file}-info\n"
-                f"2026-09-29 12:00:01 [ERROR] {profile}-{file}-error\n"
+                f"2026-09-29 12:00:00 ERROR gateway.run: {profile}-{file}-gateway-error\n"
+                f"2026-09-29 12:00:01 INFO gateway.run: {profile}-{file}-gateway-info\n"
+                f"2026-09-29 12:00:02 ERROR run_agent: {profile}-{file}-agent-error\n"
+                f"2026-09-29 12:00:03 INFO run_agent: {profile}-{file}-agent-info\n"
             )
 
     # Import after choosing the fixture home: no live profile or credentials.
@@ -39,12 +41,23 @@ with tempfile.TemporaryDirectory(prefix="dashboard-profile-logs-test-") as temp:
                     response = await client.get(endpoint, params={"profile": profile, "file": file})
                     assert response.status_code == 200, response.text
                     data = response.json()
-                    assert len(data["lines"]) == 2
+                    assert len(data["lines"]) == 4
                     assert all(profile + "-" + file in line for line in data["lines"]), data
-            response = await client.get(endpoint, params={"profile": "product", "level": "ERROR", "lines": 1})
-            assert response.json()["lines"] == ["2026-09-29 12:00:01 [ERROR] product-agent-error\n"]
+            response = await client.get(endpoint, params={"profile": "product", "level": "ERROR", "lines": 10})
+            assert response.json()["lines"] == [
+                "2026-09-29 12:00:00 ERROR gateway.run: product-agent-gateway-error\n",
+                "2026-09-29 12:00:02 ERROR run_agent: product-agent-agent-error\n",
+            ]
+            for component, logger in (("gateway", "gateway.run"), ("agent", "run_agent")):
+                response = await client.get(endpoint, params={"profile": "product", "component": component, "lines": 10})
+                selected = response.json()["lines"]
+                assert len(selected) == 2 and all(logger + ":" in line for line in selected)
+            response = await client.get(endpoint, params={"profile": "product", "component": "gateway", "level": "ERROR"})
+            assert response.json()["lines"] == ["2026-09-29 12:00:00 ERROR gateway.run: product-agent-gateway-error\n"]
             response = await client.get(endpoint, params={"profile": "procurement", "search": "info"})
-            assert len(response.json()["lines"]) == 1 and "procurement" in response.json()["lines"][0]
+            assert len(response.json()["lines"]) == 2 and all("procurement" in line for line in response.json()["lines"])
+            response = await client.get(endpoint, params={"profile": "product", "lines": 1})
+            assert response.json()["lines"] == ["2026-09-29 12:00:03 INFO run_agent: product-agent-agent-info\n"]
             for profile, status in (("../product", 400), ("absent", 404)):
                 assert (await client.get(endpoint, params={"profile": profile})).status_code == status
             assert (await client.get(endpoint, params={"file": "../config.yaml"})).status_code == 400

@@ -6,7 +6,10 @@ shows the Dashboard process's log. No Hermes source files are changed.
 
 This Dashboard plugin replaces only `/logs` through the native `tab.override`
 extension. It keeps file, level, component, line-count, manual refresh and
-five-second auto-refresh controls. It uses the host React/i18n/auth SDK and the
+five-second auto-refresh controls. Version 1.0.1 skips timer ticks while a
+same-scope request is in flight, so responses slower than five seconds can
+finish. Same-scope refresh keeps the last completed result visible; filter
+changes clear it, and filter/profile changes and unmount still cancel old requests. It uses the host React/i18n/auth SDK and the
 native profile-keyed page remount. Requests read the synchronized `?profile=`
 after the parent effect; old requests are aborted and cannot populate a newly
 selected profile. No frontend build or extra dependency is needed.
@@ -30,7 +33,10 @@ Run `test_profile_logs.py` with the installed Hermes Python and Hermes source
 on `PYTHONPATH`, then `node test_frontend.cjs`. The Python test builds temporary
 logs for default/product/procurement and tests the native ASGI auth boundary,
 profile selection, filters, invalid profiles and concurrent isolation. The
-frontend check verifies explicit scope, controls and discarded late responses.
+frontend check verifies explicit scope, controls, discarded late responses,
+and one-/six-/ten-second polling with both abort-aware and abort-ignoring transports.
+Filter fixtures use native log syntax with INFO after ERROR; separate and
+combined level/component assertions detect omitted filters.
 In the real Dashboard, switch all three profiles and compare responses against
 each profile's own log; test rapid switching and manual/automatic refresh.
 

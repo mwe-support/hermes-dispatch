@@ -3,7 +3,7 @@
   "label": "Logs",
   "description": "Read logs from the selected management profile.",
   "icon": "FileText",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "tab": {"path": "/logs", "override": "/logs", "hidden": true},
   "entry": "index.js",
   "api": "plugin_api.py"
