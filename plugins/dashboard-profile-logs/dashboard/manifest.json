@@ -1,0 +1,10 @@
+{
+  "name": "dashboard-profile-logs",
+  "label": "Logs",
+  "description": "Read logs from the selected management profile.",
+  "icon": "FileText",
+  "version": "1.0.0",
+  "tab": {"path": "/logs", "override": "/logs", "hidden": true},
+  "entry": "index.js",
+  "api": "plugin_api.py"
+}
