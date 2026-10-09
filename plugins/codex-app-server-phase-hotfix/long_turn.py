@@ -7,13 +7,14 @@ terminal answer and leaves the Codex tool running behind it.
 
 This compatibility layer changes only the default used when Hermes does not
 pass an explicit timeout.  A value of ``0`` disables the wall-clock deadline;
-interrupts, subprocess death detection, and the post-tool quiet watchdog stay
-active in the upstream session implementation.
+interrupts and subprocess death detection stay active. The default post-tool
+quiet deadline is also disabled: reasoning events do not reliably reset it.
 """
 
 from __future__ import annotations
 
 import functools
+import logging
 import math
 import os
 import time
@@ -22,6 +23,8 @@ from typing import Any, Callable
 
 TIMEOUT_ENV = "HERMES_CODEX_APP_SERVER_TURN_TIMEOUT_SECONDS"
 _PATCH_MARKER = "_codex_app_server_long_turn_hotfix_wrapped"
+_RESULT_MARKER = "_codex_app_server_failure_delivery_wrapped"
+logger = logging.getLogger(__name__)
 
 
 def configured_turn_timeout(raw: str | None = None) -> float:
@@ -55,7 +58,7 @@ def wrap_session_run_turn(original: Callable) -> Callable:
         *,
         turn_timeout: float | None = None,
         notification_poll_timeout: float = 0.25,
-        post_tool_quiet_timeout: float = 90.0,
+        post_tool_quiet_timeout: float = math.inf,
     ):
         effective_timeout = (
             configured_turn_timeout()
@@ -125,9 +128,43 @@ def wrap_session_run_turn(original: Callable) -> Callable:
     return run_turn
 
 
+def wrap_runtime_result(original: Callable) -> Callable:
+    """Do not let delivered commentary hide an unsuccessful Codex turn."""
+    @functools.wraps(original)
+    def run(*args, **kwargs):
+        result = original(*args, **kwargs)
+        if isinstance(result, dict) and (
+            result.get("failed") or result.get("error") or result.get("interrupted")
+            or result.get("partial") or result.get("completed") is False
+        ):
+            reason = result.get("error") or (
+                "任务已中断" if result.get("interrupted") else "任务未完整结束"
+            )
+            result.update(failed=True, completed=False, partial=True, error=reason,
+                          final_response=f"⚠️ Codex 任务未完成：{reason}")
+            result.pop("already_sent", None)
+            # QQ seals the visible delta ledger before its ordinary final send.
+            emit = getattr(args[0], "_fire_stream_delta", None) if args else None
+            if callable(emit):
+                try:
+                    emit("\n\n" + result["final_response"])
+                except Exception:
+                    logger.exception("Codex failure notice stream callback failed; normal delivery retained")
+            logger.error("Codex unsuccessful turn: interrupted=%s partial=%s; failure notice returned for delivery",
+                         bool(result.get("interrupted")), bool(result.get("partial")))
+        return result
+    setattr(run, _RESULT_MARKER, True)
+    return run
+
+
 def patch_codex_app_server_turn_timeout() -> str:
     """Patch the installed Hermes session class once."""
     from agent.transports.codex_app_server_session import CodexAppServerSession
+    from agent import codex_runtime
+
+    runtime = codex_runtime.run_codex_app_server_turn
+    if not getattr(runtime, _RESULT_MARKER, False):
+        codex_runtime.run_codex_app_server_turn = wrap_runtime_result(runtime)
 
     original = CodexAppServerSession.run_turn
     if getattr(original, _PATCH_MARKER, False):
@@ -135,4 +172,4 @@ def patch_codex_app_server_turn_timeout() -> str:
     CodexAppServerSession.run_turn = wrap_session_run_turn(original)
     configured = configured_turn_timeout()
     label = "unlimited" if math.isinf(configured) else f"{configured:g}s"
-    return f"patched Codex turn wall deadline (default={label})"
+    return f"patched Codex turn wall deadline (default={label}), post-tool quiet deadline disabled, failure delivery patched"

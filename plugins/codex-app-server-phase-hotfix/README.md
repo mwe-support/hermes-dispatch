@@ -296,8 +296,9 @@ HERMES_CODEX_APP_SERVER_TURN_TIMEOUT_SECONDS=0
 A positive value restores a finite wall deadline in seconds. When that finite
 deadline is reached without `turn/completed`, the plugin interrupts and retires
 the Codex subprocess instead of delivering the latest commentary as success.
-This does not disable `/stop`, message interrupt/steer, subprocess-death checks,
-or Hermes' post-tool quiet watchdog.
+This does not disable `/stop`, message interrupt/steer or subprocess-death
+checks. Since 1.8.8, the default post-tool quiet watchdog is also disabled as
+described below; callers can still explicitly request a finite quiet timeout.
 
 Hermes Gateway has a separate inactivity watchdog. For deliberately silent
 foreground work lasting more than 30 minutes, set it above the longest valid
@@ -466,3 +467,51 @@ Remove the session-project portion once upstream durably maps Gateway
 `session_key`/`session_id` to a project cwd and resumes Codex thread ids after
 Agent reconstruction. Disabling the plugin does not delete its SQLite mapping,
 default project directories or project memory files.
+
+
+## Failed and interrupted Codex turns (1.8.8)
+
+Hermes 0.21.0 defaults to a 90-second post-tool quiet deadline, but reasoning
+events do not reset it. A healthy turn can therefore be interrupted while the
+model is still reasoning. This plugin disables that default deadline without
+changing the upstream source or the separate Gateway inactivity timeout.
+
+Hermes' projector can retain commentary as `final_text` when a turn is
+interrupted or fails. The Codex runtime returns `partial`/`error` without
+`failed`, while Gateway uses `failed` to decide whether already-streamed text
+may suppress a final send. This can hide both the failure notice and the fact
+that no business result was completed. The removable runtime wrapper now marks
+unsuccessful returns as failed/incomplete, clears `already_sent`, and returns
+an explicit failure notice instead of commentary. Successful responses remain
+unchanged. A privacy-safe ERROR log records the failed boundary without prompts
+or identifiers. Existing Gateway redaction and routing apply to the notice.
+
+Install the updated plugin through `scripts/install-plugins.sh`, then restart
+an idle target Gateway. No Hermes source or approval setting is changed. Run
+`test_long_turn_delivery.py` under the Hermes Python runtime: it replays a real
+transport turn beyond 90 seconds and verifies failure/interruption delivery
+flags, success preservation and explicit finite-timeout compatibility. Also run
+`test_hotfix.py` to check existing bridge behavior. Confirm a real QQ private
+long task's final marker and a controlled test-worker failure notice. Restore
+the installer backup and restart the profile to roll back.
+
+Without this quiet timer, silent work can wait longer; the separately configured
+Gateway inactivity timeout, explicit wall deadlines, user stop and process-exit
+detection remain active. This change does not grant MCP approvals or change QQ
+passive/proactive permissions.
+The failure notice also goes through the Agent's existing filtered stream-delta
+callback before finalization. QQ's native consumer seals its visible delta
+ledger first; without this, its completed-owner record can claim the error
+payload while still displaying only commentary. Non-streaming callers retain
+normal failed-result delivery, and callback errors are logged without discarding
+that result.
+
+Local acceptance on 2026-10-09 used the default profile's system-development
+bot in an isolated QQ private session. A foreground 110-second command completed
+in a 139-second Codex turn and its final `QQ_LONGTASK_OK_1009` marker appeared in
+QQ. A controlled exit of only the test turn's worker displayed the explicit
+failure notice in QQ; the next turn delivered `QQ_RECOVER_OK_1009`. The real
+long task included intermediate commentary, so the separate deterministic
+transport replay establishes the more specific post-tool >90-second case.
+`test_long_turn_delivery.py` and `test_hotfix.py` passed. This acceptance covers
+one local profile; other hosts and a manual `/stop` were not exercised.
