@@ -27,6 +27,7 @@
   },
   "tests": [
     "plugins/codex-app-server-phase-hotfix/test_hotfix.py",
+    "plugins/codex-app-server-phase-hotfix/test_long_turn_delivery.py",
     "plugins/codex-app-server-phase-hotfix/test_startup.py",
     "plugins/codex-app-server-phase-hotfix/test_model_controls.py",
     "plugins/codex-app-server-phase-hotfix/test_qq_delivery_hook.py",

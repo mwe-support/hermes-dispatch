@@ -494,6 +494,9 @@ flags, success preservation and explicit finite-timeout compatibility. Also run
 `test_hotfix.py` to check existing bridge behavior. Confirm a real QQ private
 long task's final marker and a controlled test-worker failure notice. Restore
 the installer backup and restart the profile to roll back.
+The all-profile updater release manifest includes `test_long_turn_delivery.py`
+so each target runs this check against its own installed Hermes transport before
+changing live plugins. Existing active-task deferral, backup and rollback apply.
 
 Without this quiet timer, silent work can wait longer; the separately configured
 Gateway inactivity timeout, explicit wall deadlines, user stop and process-exit
