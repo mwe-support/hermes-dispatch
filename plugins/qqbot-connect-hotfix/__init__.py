@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import functools
 import threading
 
@@ -77,6 +78,9 @@ def register(ctx):
     _patch_output_file_delivery(QQAdapter)
     _defer_gateway_methods(QQAdapter)
     _patch_cron_delivery(QQAdapter)
+    if os.getenv("QQ_GROUP_INVITE_TRUST_MODE", "disabled") != "disabled":
+        from .group_invite_guards import install
+        install(QQAdapter)
 
 
 def _defer_gateway_methods(QQAdapter):
@@ -104,6 +108,9 @@ def _defer_gateway_methods(QQAdapter):
 
 def _patch_gateway_methods(QQAdapter):
     from gateway.run import GatewayRunner
+    if os.getenv("QQ_GROUP_INVITE_TRUST_MODE", "disabled") != "disabled":
+        from .group_invite_guards import install_authorization
+        install_authorization(GatewayRunner)
     from .cron_binding import patch_gateway_scope
     patch_gateway_scope(GatewayRunner)
     from .model_scope import patch_global_model_scope

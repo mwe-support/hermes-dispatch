@@ -1290,3 +1290,204 @@ that final overlay, retaining the original venv site-packages and `.pth`
 processing. Without this wrapper, no-agent jobs lost their extra-send guard.
 `test_cron_delivery.py` replays the Windows overlay on POSIX and exercises the
 real Windows path natively, while keeping external network calls forbidden.
+
+
+## Trusted inviter → automatic whole-group authorization (1.8.42)
+
+Optional part of `qqbot-connect-hotfix`, for the native QQ adapter in Hermes v0.21.
+A verified developer-experience user's invitation authorizes the entire group.
+Every member, including later arrivals, can use the bot: **there is no group
+member allowlist**. Existing tool approval/owner checks remain unchanged.
+Hermes source is never edited; disable this feature or restore the owner-mounted plugin to roll back.
+
+## Why an extension is required
+
+QQ's public-group setting permits invitations independently of its developer
+friend-user roster. The console does not provide an inviter-user-to-any-group
+permission. Hermes currently ignores `GROUP_ADD_ROBOT` and `GROUP_DEL_ROBOT`.
+Its existing group allowlist is manually configured, while snapshot/context
+plugins can consume messages before native authorization runs.
+
+This extension captures official invitation identity, persists group trust and
+checks it before group snapshot/context/attachment/model handling. It also gates
+group interactions, normalized Gateway authorization and group REST requests
+(messages and media). Global user/group allow-all options do not bypass it.
+C2C and QQ channel policy are unchanged.
+
+It controls **which invited groups receive service**, not the QQ client's
+ability to add the bot. No unsupported automatic leave-group API is assumed.
+
+## Verify and bind an inviter first
+
+Use the bot's own platform developer-experience roster as the authority. Confirm
+the actual logged-in QQ account, then have it invite that bot into two distinct
+test groups while observation is enabled. Compare both `op_member_openid`
+values. Do not bind a user using a nickname, self-asserted QQ number, first group
+speaker, or an assumed C2C/group OpenID equality.
+
+On 2026-10-13, one operator-confirmed developer-experience account invited the
+same bot into two newly created groups containing only that account and bot.
+Two real lifecycle events had different group OpenIDs and identical 32-character
+inviter OpenIDs. IDs also matched that account's previously captured group
+sender identity. This is evidence for that account/bot, not all bots/accounts.
+No real QQ numbers, bot identifiers or OpenIDs are published with this package.
+
+**Scope warning:** Tencent's currently published unique-identity document still
+states that one user's `member_openid` differs across groups of the same bot.
+The invitation contract describes `op_member_openid` as that group member's
+OpenID. The two equal values observed above do not establish a universal stable
+identity contract. Treat this optional feature as an observation pilot pending
+authoritative identity binding; do not promote arbitrary cross-group IDs to a
+global developer identity based on those two samples.
+
+Binding records are maintained by the operator. No public API for reading the
+console's developer-experience roster is assumed, and console edits are not
+silently auto-synchronized. Update the local verified binding list when that
+roster changes. Verify each account/bot binding; do not copy OpenIDs across bots.
+
+### Automatic roster / identity synchronization investigation (2026-10-13)
+
+The logged-in console's official frontend calls this read-only management query:
+
+```text
+POST https://bot.q.qq.com/cgi-bin/v2/bot_scope_manager/scope_cfg/query
+{"bot_appid": "<numeric AppID>",
+ "query_filter": {"scope_config": 1, "white_list": 1, "search_config": 1}}
+```
+
+Its live `data.friend_infos` response contains **only `uin` and `nick_name`**;
+no OpenID or unified-identity field was present. The complete response reflected
+new console roster entries during the investigation, so latest-roster reading
+is feasible in the authenticated management session. This is a management UI
+interface, not a verified Bot OpenAPI contract. A read-only call using this bot's
+Bot AccessToken and no management-session credentials returned HTTP/retcode 401.
+No browser cookies or session credentials were exported to the Gateway/server.
+
+New official member-detail/list APIs can return `member_openid` and
+`union_openid` (when available), but are invite-only for API-whitelisted bots.
+Member-detail calls for both verified pilot groups returned HTTP 400/code 11253:
+this bot currently lacks that permission. The documented response still has no
+QQ-number/UIN field. `FRIEND_ADD` can additionally carry `author.union_openid`,
+but no verified UIN-to-unified-identity bridge was found. Channel-only special
+union-account capabilities must not be substituted for QQ group identity.
+
+Therefore **automatic latest-roster → authoritative inviter OpenID binding has
+not passed verification and is not implemented**. Nickname joins, guessed
+hash/conversion formulas, a new user's self-claimed QQ number or presumed
+C2C/group equality are not acceptable fallback methods.
+
+Before enabling automatic enforcement, synchronization must produce a complete,
+fresh, correctly bot-scoped roster with proven identity bindings. New unmapped
+accounts stay pending; removals revoke their derived access; incomplete, failed
+or expired snapshots cannot keep old grants valid indefinitely. That freshness
+protocol is a prerequisite for the proposed automatic synchronizer, not a claim
+that the current manual policy has implemented it. Keep the pilot in `observe`
+while this identity/permission gap remains unresolved.
+
+## Install and modes
+
+Run as the profile data owner:
+
+```bash
+bash scripts/install-plugins.sh <hermes-home> qqbot-connect-hotfix
+```
+
+Keep `qqbot-connect-hotfix` enabled in that profile's config. Its feature guards
+are installed after the QQ compatibility wrappers. A `requires_plugins` ordering
+hint loads `message-snapshot-store` first when both plugins are enabled. Gateway
+authorization is patched at first adapter construction, preserving the existing
+import-deadlock avoidance. The feature is **not automatically enabled** by
+updates; existing installations keep their access policy.
+
+Set `QQ_GROUP_INVITE_TRUST_MODE` in the profile `.env`:
+
+| Value | Behavior |
+| --- | --- |
+| `disabled` (default) | No adapter changes from this plugin |
+| `observe` | Capture identity metadata and lifecycle decisions; normal bot service continues |
+| `enforce` | Only groups with a valid trusted invitation record receive service |
+
+An invalid mode fails closed for group access if the plugin is loaded. Restart
+the existing Gateway service when idle after changing mode or plugin source.
+Preserve the Dispatch launchd wrapper and service domain; do not rewrite core.
+
+For verified bindings, create `<hermes-home>/qq-group-invite-trust.json`, owner
+read/write only (mode 600). Example placeholders:
+
+```json
+{
+  "app_id": "<this-bot-AppID>",
+  "trusted_inviters": ["<verified-32-character-inviter-OpenID>"]
+}
+```
+
+Only verified **inviters** are listed; group members are not listed. Wildcards
+are rejected. Policy must match the receiving bot. The policy is re-read for
+access decisions, so removing an inviter suspends its authorized groups without
+editing member lists. Restoring that binding re-enables still-present approved
+groups; a removal/untrusted re-invitation still requires a new trusted invitation.
+POSIX file owner and mode are checked automatically. On Windows, POSIX mode
+bits do not represent NTFS permissions: keep policy and state beneath the
+service account's private profile and restrict inherited NTFS ACLs to that
+account, SYSTEM and administrators before enforcement. Windows hardware
+acceptance has not been performed in this pilot.
+
+## State, lifecycle and existing groups
+
+Private group state is `<hermes-home>/state/qq-group-invite-trust.sqlite3`, keyed
+by bot AppID and group OpenID. ADD from a trusted inviter grants the group;
+ADD from another inviter blocks it; DEL revokes it regardless of who removed
+the bot. Duplicate/older events cannot restore revoked trust. DEL wins equal-
+timestamp ties; a legitimate re-add must have a later timestamp. Missing,
+corrupt, wrong-bot or non-private policy/state fails closed in enforcement.
+A lifecycle persistence failure blocks this adapter until restarted/repaired.
+
+Observation metadata is `state/qq-group-invite-trust-observe.jsonl`, mode 600,
+capped at 512 KiB. It contains event/identity metadata, not text, attachments,
+usernames, credentials or complete event bodies. Archive the file privately and
+remove/rotate it when starting another verification round after reaching the cap.
+
+**Historical groups without invitation evidence are not automatically trusted.**
+Keep observation mode while existing business groups are being verified. Only
+import historical records when their inviter identity has been independently
+confirmed; never grant trust merely because the bot is currently in the group.
+The October 13 pilot retains observation mode by explicit operator choice.
+
+## Verification
+
+```bash
+python3 plugins/qqbot-connect-hotfix/test_group_invite_observer.py
+python3 plugins/qqbot-connect-hotfix/test_group_invite_trust.py
+python3 plugins/qqbot-connect-hotfix/test_group_invite_guards.py
+# With Hermes source available on PYTHONPATH, using its venv Python:
+python3 plugins/qqbot-connect-hotfix/test_group_invite_startup.py
+```
+
+Checks cover durable/restart state, same-bot scope, revocation, stale/tied events,
+untrusted re-invitation, malformed/private policy, symlinks, real Dispatch
+snapshot/context wrapper ordering, raw and direct/normalized intake, all-member
+Gateway access, group buttons, outbound messages/media, and C2C isolation.
+Live acceptance additionally needs a non-inviter member to address the bot in
+an authorized group and a nontrusted account to invite it to another test group.
+Replay/fixture checks do not claim those client-side scenarios were performed.
+
+## Rollback
+
+Back up config, `.env`, policy and private SQLite state before enabling. Set mode
+back to `observe` to stop enforcing while retaining evidence, or restore the previous
+`qqbot-connect-hotfix` plugin and restart the existing Gateway. The installer retains prior plugin
+versions under `plugin-backups`, outside plugin discovery. Keep sessions,
+credentials, approval plugins, service domains and other Hermes data intact.
+Disabling the guard restores the original QQ access policy, including any broad
+allow-all setting: review that policy before rollback.
+
+## Contract sources
+
+- [QQ group lifecycle fields](https://github.com/tencent-connect/bot-docs/blob/main/docs/develop/api-v2/server-inter/group/manage/event.md)
+- [QQ separate group and user scopes](https://github.com/tencent-connect/bot-docs/blob/main/docs/README.md#10-使用范围与人员配置)
+- [QQ identity scopes](https://github.com/tencent-connect/bot-docs/blob/main/docs/develop/api-v2/dev-prepare/unique-id.md)
+- [Official console frontend management query](https://qq-ai.cdn-go.cn/web/neon/-/87a13a93/q.qq.com_qqbot_dashboard/assets/BotManage-legacy.js)
+- [Official group member detail API](https://bot.q.qq.com/wiki/develop/api-v2/autogen/api/v2_groups_group_openid_members_member_openid.get.html)
+- [Official group member list API](https://bot.q.qq.com/wiki/develop/api-v2/autogen/api/v2_groups_group_openid_members.get.html)
+- [Official friend-added identity fields](https://bot.q.qq.com/wiki/develop/api-v2/autogen/event/friend_add.html)
+- [Hermes native QQ adapter](https://github.com/NousResearch/hermes-agent/blob/29112bef099274229cadff79cdff7bf7b99c4b77/gateway/platforms/qqbot/adapter.py)

@@ -58,6 +58,10 @@
     "plugins/codex-app-server-phase-hotfix/test_mcp_approvals.py",
     "plugins/codex-app-server-phase-hotfix/test_approval_reviewer.py",
     "plugins/weknora-qq-routing/test_routing.py",
-    "ops/test_enable_weknora_routing.py"
+    "ops/test_enable_weknora_routing.py",
+    "plugins/qqbot-connect-hotfix/test_group_invite_observer.py",
+    "plugins/qqbot-connect-hotfix/test_group_invite_trust.py",
+    "plugins/qqbot-connect-hotfix/test_group_invite_guards.py",
+    "plugins/qqbot-connect-hotfix/test_group_invite_startup.py"
   ]
 }
