@@ -1,4 +1,4 @@
-"""Run the upstream hermes-tools MCP with profile-gated A2A tools added."""
+"""Run the upstream hermes-tools MCP with its available A2A tools added."""
 
 from __future__ import annotations
 
@@ -91,15 +91,6 @@ def main():
         return 2
 
     from agent.transports import hermes_tools_mcp_server as upstream
-
-    if not home:
-        # A shared Codex home also serves desktop sessions with no Hermes profile.
-        original_exports = upstream.EXPOSED_TOOLS
-        try:
-            upstream.EXPOSED_TOOLS = tuple(name for name in original_exports if name not in A2A_TOOLS)
-            return upstream.main()
-        finally:
-            upstream.EXPOSED_TOOLS = original_exports
 
     original_builder = upstream._build_server
     try:

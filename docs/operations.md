@@ -787,6 +787,15 @@ update. An edit during regression checks defers installation; a newer local A2A
 plugin also preserves its associated wrapper. Credentials, SOUL contents and
 Codex MCP configuration are outside this update operation.
 
+The A2A MCP wrapper no longer requires an explicit `HERMES_HOME` to export the
+five tools. An ordinary Codex session uses the default Hermes home's A2A
+configuration; Gateway sessions retain their supplied profile home. Back up and
+replace the existing wrapper, then reload MCP or start a fresh Codex runtime.
+Verify the tool inventory through that Codex connection and read `a2a_list`;
+standalone MCP discovery does not prove an existing session refreshed. Restore
+the wrapper backup and reload MCP to recover the former profile-only export
+behavior. This changes neither SOUL injection nor automatic collaboration rules.
+
 Run the standard all-profile script, then inspect its applied commit, installed
 plugin hashes and `a2a_wrapper_changed` result. Confirm existing enable/disable
 lists and Finance's approval bridge are preserved. Test a real authenticated A2A

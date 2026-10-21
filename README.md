@@ -88,6 +88,8 @@ for dry-run, verification, and rollback.
 For A2A calls from the Codex app-server runtime, see the opt-in
 [`hermes-tools` A2A entrypoint](mcp/hermes-tools-a2a/README.md). It reuses Hermes'
 A2A client without changing the messaging HTTP bridge or installing a listener.
+The entrypoint also exports available A2A tools to ordinary Codex sessions without
+`HERMES_HOME`, using Hermes' default home; explicit profile routing is preserved.
 For responsibility descriptions and business-facing peer aliases, see the optional
 [A2A peer directory](plugins/a2a-peer-directory/README.md). It preserves internal
 profile IDs and existing authenticated routes.

@@ -158,9 +158,12 @@ callback's fixed exports. The wrapper adds only the five upstream A2A tools,
 retains their profile-config availability gates, and supplements raw A2A schemas
 when tool-search compaction hides them. It reuses the upstream builder and
 dispatch path; authentication and conversation storage remain upstream-owned.
-Codex must forward the calling profile's absolute `HERMES_HOME` through the
-MCP entry's `env_vars`; relative homes are rejected, while missing homes retain
-upstream tools without A2A to prevent silent default-profile fallback. This entrypoint neither starts inbound A2A nor
+Profile-bound Codex sessions must forward the calling profile's absolute
+`HERMES_HOME` through the MCP entry's `env_vars`; relative homes are rejected.
+Ordinary Codex sessions with an absent or empty `HERMES_HOME` use Hermes' native
+platform default home, exposing A2A when that home's upstream availability gate
+passes. Peers, authentication, and conversation storage all use the selected
+home. This entrypoint neither starts inbound A2A nor
 changes Gateway routes. See its [enable, verification, and rollback guide](../mcp/hermes-tools-a2a/README.md).
 
 `mcp/http-gateway` exposes Hermes MCP over streamable HTTP with bearer-token

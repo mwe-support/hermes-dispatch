@@ -83,14 +83,24 @@ class BridgeTests(unittest.TestCase):
             self.assertEqual(main(), 2)
             self.assertIn("HERMES_HOME", stderr.getvalue())
 
-    def test_unscoped_codex_keeps_legacy_tools_without_a2a(self):
+    def test_unscoped_codex_exports_a2a_without_binding_a_profile(self):
         self.base.append(definition("a2a_call"))
         self.upstream.EXPOSED_TOOLS += ("a2a_call",)
         original_exports = self.upstream.EXPOSED_TOOLS
-        self.upstream.main = Mock(side_effect=self.build)
-        with patch.dict(os.environ, {"HERMES_HOME": ""}):
-            self.assertEqual(main(), [self.base[0]])
+        self.upstream._build_server = self.build
+        original_builder = self.upstream._build_server
+        self.upstream.main = Mock(side_effect=lambda: self.upstream._build_server())
+        for value in (None, ""):
+            with self.subTest(home=value), patch.dict(os.environ):
+                if value is None:
+                    os.environ.pop("HERMES_HOME", None)
+                else:
+                    os.environ["HERMES_HOME"] = value
+                self.assertEqual({d["function"]["name"] for d in main()},
+                                 {"web_search", *A2A_TOOLS})
+                self.assertEqual(os.environ.get("HERMES_HOME"), value)
         self.assertEqual(self.upstream.EXPOSED_TOOLS, original_exports)
+        self.assertIs(self.upstream._build_server, original_builder)
         self.assertIs(self.model_tools.get_tool_definitions, self.original)
 
 

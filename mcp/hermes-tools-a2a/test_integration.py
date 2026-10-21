@@ -79,6 +79,8 @@ class IntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.tmp = tempfile.TemporaryDirectory(prefix="hermes-a2a-mcp-")
         self.addCleanup(self.tmp.cleanup)
         self.root = Path(self.tmp.name)
+        self.default_home = self.root / ("AppData/Local/hermes" if os.name == "nt" else ".hermes")
+        self.default_home.parent.mkdir(parents=True, exist_ok=True)
         self.cert, self.key = certificate(self.root)
         with patch.dict(os.environ, {"A2A_PUBLIC_URL": "https://127.0.0.1"}):
             self.peer = tls_server(ThreadingHTTPServer, self.cert, self.key)(("127.0.0.1", 0), Peer)
@@ -115,6 +117,7 @@ class IntegrationTests(unittest.IsolatedAsyncioTestCase):
         env = {k: v for k, v in os.environ.items()
                if k in ("PATH", "SYSTEMROOT", "TEMP", "TMP", "TMPDIR", "LANG")}
         env.update(HOME=str(self.root), USERPROFILE=str(self.root), HERMES_HOME=str(home),
+                   LOCALAPPDATA=str(self.root / "AppData" / "Local"),
                    PYTHONPATH=str(self.source), HERMES_QUIET="1", HERMES_REDACT_SECRETS="true",
                    PYTHONDONTWRITEBYTECODE="1")
         if not forward_home:
@@ -148,14 +151,37 @@ class IntegrationTests(unittest.IsolatedAsyncioTestCase):
             names = {t.name for t in (await client.list_tools()).tools}
             self.assertFalse(names & set(A2A_TOOLS))
 
-    async def test_unscoped_codex_keeps_upstream_tool_inventory(self):
+    async def test_unscoped_codex_exports_a2a_using_default_home(self):
         home = self.home("desktop")
+        home.rename(self.default_home)
+        # A profile-like working directory must not select its peer configuration.
+        home = self.home("other")
         async with self.client(home, wrapped=False, forward_home=False) as client:
             baseline = {t.name for t in (await client.list_tools()).tools}
         async with self.client(home, forward_home=False) as client:
             names = {t.name for t in (await client.list_tools()).tools}
-            self.assertEqual(names, baseline - set(A2A_TOOLS))
+            self.assertEqual(names, baseline | set(A2A_TOOLS))
             self.assertIn("skills_list", names)
+            listing = await self.call(client, "a2a_list", {})
+            self.assertIn("peer-desktop", listing)
+            self.assertNotIn("peer-other", listing)
+            result = await self.call(client, "a2a_call", {
+                "agent": "peer-desktop", "message": "unscoped roundtrip", "context_id": "desktop-test",
+            })
+            self.assertIn("desktop received: unscoped roundtrip", result)
+        self.assertTrue((self.default_home / "a2a_conversations/desktop-test.jsonl").exists())
+        self.assertFalse((home / "a2a_conversations/desktop-test.jsonl").exists())
+
+    async def test_unscoped_codex_ignores_parent_local_appdata(self):
+        inherited = self.root / "parent-appdata"
+        inherited.mkdir()
+        # The MCP SDK inherits LOCALAPPDATA on Windows even when env omits it.
+        with patch.dict(os.environ, {"LOCALAPPDATA": str(inherited)}):
+            try:
+                await self.test_unscoped_codex_exports_a2a_using_default_home()
+            finally:
+                self.assertEqual(list(inherited.iterdir()), [],
+                                 "MCP child touched the parent's Windows app-data directory")
 
     async def test_peer_directory_metadata_alias_and_capability_routing(self):
         for name in ("alpha", "beta"):
@@ -265,7 +291,16 @@ class IntegrationTests(unittest.IsolatedAsyncioTestCase):
 
     @unittest.skipUnless(os.environ.get("CODEX_BINARY"), "Set CODEX_BINARY for app-server verification")
     async def test_codex_app_server_discovers_and_calls_a2a(self):
+        await self.check_codex_app_server(forward_home=True)
+
+    @unittest.skipUnless(os.environ.get("CODEX_BINARY"), "Set CODEX_BINARY for app-server verification")
+    async def test_unscoped_codex_app_server_discovers_and_calls_a2a(self):
+        await self.check_codex_app_server(forward_home=False)
+
+    async def check_codex_app_server(self, forward_home):
         home = self.home("codex")
+        if not forward_home:
+            home.rename(self.default_home)
         codex_home = self.root / "codex-home"
         codex_home.mkdir()
         (codex_home / "config.toml").write_text(
@@ -283,7 +318,10 @@ class IntegrationTests(unittest.IsolatedAsyncioTestCase):
         env = {k: v for k, v in os.environ.items()
                if k in ("PATH", "SYSTEMROOT", "TEMP", "TMP", "TMPDIR", "LANG")}
         env.update(HOME=str(self.root), USERPROFILE=str(self.root), CODEX_HOME=str(codex_home),
-                   HERMES_HOME=str(home), PYTHONDONTWRITEBYTECODE="1")
+                   LOCALAPPDATA=str(self.root / "AppData" / "Local"),
+                   PYTHONDONTWRITEBYTECODE="1")
+        if forward_home:
+            env["HERMES_HOME"] = str(home)
         proc = await asyncio.create_subprocess_exec(
             os.environ["CODEX_BINARY"], "app-server", cwd=self.root, env=env,
             stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
@@ -330,7 +368,15 @@ class IntegrationTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn("codex received: app-server roundtrip", text)
         finally:
             if proc.returncode is None:
-                proc.terminate()
+                if os.name == "nt":
+                    # Codex's Git children can still hold the temporary home open.
+                    cleanup = await asyncio.create_subprocess_exec(
+                        "taskkill", "/PID", str(proc.pid), "/T", "/F",
+                        stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL,
+                    )
+                    await cleanup.wait()
+                else:
+                    proc.terminate()
                 try:
                     await asyncio.wait_for(proc.wait(), timeout=5)
                 except asyncio.TimeoutError:
