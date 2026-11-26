@@ -199,10 +199,24 @@ def patch_group_results(QQAdapter):
     original_send = QQAdapter.send
     original_retry = QQAdapter._send_with_retry
     original_notice = QQAdapter._notify_media_delivery_failure
+    original_set_handler = QQAdapter.set_message_handler
     media_methods = {"document": ("send_document", "file_path"), "image": ("send_image_file", "image_path"),
                      "remote_image": ("send_image", "image_url"),
                      "video": ("send_video", "video_path"), "voice": ("send_voice", "audio_path")}
     QQAdapter._qq_group_results_original_media = {}
+
+    @functools.wraps(original_set_handler)
+    def set_handler(self, handler):
+        if handler is None:
+            return original_set_handler(self, handler)
+        @functools.wraps(handler)
+        async def dispatch(event):
+            turn = _TURN.get()
+            if turn and turn['chat'] == str(event.source.chat_id) and 'recovery_notice' in turn:
+                return turn['recovery_notice']
+            return await handler(event)
+        return original_set_handler(self, dispatch)
+    QQAdapter.set_message_handler = set_handler
 
     @functools.wraps(original_process)
     async def process(self, event, session_key):
@@ -217,31 +231,34 @@ def patch_group_results(QQAdapter):
             fresh = (group and authorized and bool(event.message_id) and not getattr(event, "internal", False)
                      and getattr(stamp, "tzinfo", None) is not None
                      and -5 <= time.time() - stamp.timestamp() < WINDOW)
-            if fresh:
-                anchor = str(event.message_id or "")
-                await _flush(self, chat, anchor)
-                if str(event.text or "").strip() in _COMMANDS:
-                    counts = await asyncio.to_thread(_store(self).counts, chat)
-                    remaining = counts.get("pending", 0)
-                    uncertain = counts.get("uncertain", 0) + counts.get("sending", 0)
-                    notice = f"待交付结果还剩 {remaining} 项。" if remaining else "当前没有待补发项。"
-                    if remaining:
-                        notice += "请再次 @我发送“领取结果”。"
-                    if uncertain:
-                        notice += f"另有 {uncertain} 项回执不明确，已保留供核对，未自动重发。"
-                    priority = PRIORITY.set("final")
-                    try:
-                        await self._send_group_text(chat, notice, reply_to=anchor)
-                    finally:
-                        PRIORITY.reset(priority)
-                    return
-                if not event.is_command():
-                    await self.send(chat, "已收到。未显示的结果可 @我发送“领取结果”，无需重做任务。",
-                                    reply_to=anchor, metadata={"_interim_send": True})
+            recovery = str(event.text or "").strip() in _COMMANDS
+            try:
+                if fresh:
+                    anchor = str(event.message_id or "")
+                    await _flush(self, chat, anchor)
+                    if recovery:
+                        counts = await asyncio.to_thread(_store(self).counts, chat)
+                        remaining = counts.get("pending", 0)
+                        uncertain = counts.get("uncertain", 0) + counts.get("sending", 0)
+                        notice = f"待交付结果还剩 {remaining} 项。" if remaining else "当前没有待补发项。"
+                        if remaining:
+                            notice += "请再次 @我发送“领取结果”。"
+                        if uncertain:
+                            notice += f"另有 {uncertain} 项回执不明确，已保留供核对，未自动重发。"
+                        _TURN.get().update(command=True, recovery_notice=notice)
+                    elif not event.is_command():
+                        await self.send(chat, "已收到。未显示的结果可 @我发送“领取结果”，无需重做任务。",
+                                        reply_to=anchor, metadata={"_interim_send": True})
+            except Exception:
+                logger.exception("QQ result preparation failed; preserving native session cleanup")
+                if fresh and recovery:
+                    _TURN.get().update(command=True, recovery_notice="暂时无法读取待交付结果，未重新执行原任务，请稍后重试。")
             result = await original_process(self, event, session_key)
-            if fresh and not event.is_command():
-                # Final delivery has had first use of its reserved slots.
-                await _flush(self, chat, anchor)
+            if fresh and not event.is_command() and not recovery:
+                try:
+                    await _flush(self, chat, anchor)
+                except Exception:
+                    logger.exception("QQ pending-result flush failed; retained for retry")
             return result
         finally:
             _TURN.reset(token)

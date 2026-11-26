@@ -23,6 +23,10 @@ class BudgetDenied(RuntimeError):
     pass
 
 
+class ReplyExpired(BudgetDenied):
+    pass
+
+
 def is_budget_error(error):
     text = str(error or '')
     return ('qq_reply_budget_forbidden' in text or '40034128' in text
@@ -89,7 +93,9 @@ class Ledger:
             progress = db.execute("SELECT count(*) FROM requests WHERE bot=? AND msg=? AND priority='progress'", (bot, msg)).fetchone()[0]
             reserve = 2 if a['scene'] == 'group' else 1
             cap = a['cap'] if priority == 'final' else a['cap'] - reserve
-            if a['exhausted'] or time.time() >= a['expires'] - 5 or used >= cap or (priority == 'progress' and progress):
+            if not a['exhausted'] and time.time() >= a['expires'] - 5:
+                raise ReplyExpired('QQ msg_id expired: use the existing one-shot standalone fallback')
+            if a['exhausted'] or used >= cap or (priority == 'progress' and progress):
                 raise BudgetDenied('qq_reply_budget_forbidden: exhausted, reserved for final, or window closed')
             seq = a['next_seq']
             db.execute('UPDATE anchors SET next_seq=next_seq+1 WHERE bot=? AND msg=?', (bot, msg))
@@ -172,7 +178,9 @@ def patch_reply_budget(QQAdapter):
         route, chat, endpoint = match.groups()
         wire = dict(body)
         anchor = _ANCHOR.get()
-        if not wire.get('msg_id') and anchor and anchor[:2] == (id(self), chat) and anchor[2]:
+        from .outbound import _EXPIRED_REPLY_STANDALONE, is_expired_reply_error
+        if (not wire.get('msg_id') and _EXPIRED_REPLY_STANDALONE.get() != chat
+                and anchor and anchor[:2] == (id(self), chat) and anchor[2]):
             wire['msg_id'] = anchor[2]
         if not wire.get('msg_id'):
             return await original(self, method, path, wire, *args, **kwargs)
@@ -199,11 +207,14 @@ def patch_reply_budget(QQAdapter):
                     and not (response.get('id') or response.get('stream_msg_id'))):
                 raise RuntimeError('QQ response unconfirmed: missing message id')
         except Exception as exc:
-            blocked = is_budget_error(exc) or ('过期' in str(exc) and any(x in str(exc) for x in ('msg_id', 'msgid')))
+            expired = is_expired_reply_error(exc)
+            blocked = is_budget_error(exc) or expired
             # An explicit HTTP rejection did not accept this message; timeouts stay charged.
             rejected = bool(re.search(r'API error \[4\d\d\]', str(exc)))
             if not claim.get('update'):
                 await asyncio.to_thread(ledger(self).finish, bot, msg, key, rejected=rejected, exhausted=blocked)
+            if expired:
+                raise ReplyExpired('QQ msg_id expired: use the existing one-shot standalone fallback') from exc
             if blocked:
                 raise BudgetDenied('qq_reply_budget_forbidden: QQ rejected the passive reply allowance') from exc
             raise

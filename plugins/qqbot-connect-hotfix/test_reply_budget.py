@@ -23,6 +23,8 @@ from gateway.platforms.qqbot.adapter import QQAdapter
 class Adapter(QQAdapter):
     async def _api_request(self, method, path, body=None, *args, **kwargs):
         self.wire.append((path, dict(body)))
+        if getattr(self,'expired_anchor',None) and body.get('msg_id')==self.expired_anchor:
+            raise RuntimeError('QQ Bot API error [400]: msg_id已过期')
         if self.failure:
             raise RuntimeError(self.failure)
         await asyncio.sleep(0)
@@ -135,9 +137,9 @@ class Tests(unittest.IsolatedAsyncioTestCase):
         self.remember('new-msg')
         event=SimpleNamespace(source=SimpleNamespace(chat_type='group',chat_id='group',user_id='user'),message_id='new-msg',timestamp=datetime.now(timezone.utc),internal=False,text='领取结果',is_command=lambda:False)
         await self.a._process_message_background(event,'fixture-session')
-        self.assertEqual(self.a.processed,0)
+        self.assertEqual(self.a.processed,1)  # Native lifecycle remains responsible for cleanup.
         self.assertEqual(self.a._qq_group_results_store.counts('group'),{'delivered':7})
-        self.assertEqual(len(self.a.wire),8)
+        self.assertEqual(len(self.a.wire),7)  # This fixture's lifecycle does not emit the notice.
         self.assertTrue(all(body['msg_id']=='new-msg' for _,body in self.a.wire[5:]))
 
     async def test_sixty_minute_expiry_and_ten_minute_reply(self):
@@ -243,5 +245,45 @@ class Tests(unittest.IsolatedAsyncioTestCase):
             await self.a._notify_media_delivery_failure('group',str(f),metadata={'notify':True})
         finally:outbox._TURN.reset(token)
         self.assertEqual(self.a._qq_group_results_store.counts('group'),{'delivered':5,'pending':1})
+
+    async def test_results_command_releases_real_hermes_session_guard(self):
+        from gateway.platforms.base import MessageEvent
+        from gateway.config import Platform
+        from gateway.session import SessionSource
+        class NativeLifecycle(QQAdapter):
+            _api_request = Adapter._api_request.__wrapped__
+        budget.patch_reply_budget(NativeLifecycle)
+        outbox.patch_group_results(NativeLifecycle)
+        a=NativeLifecycle(PlatformConfig(extra={'app_id':'fixture-bot','client_secret':'fixture-secret'}))
+        a._running=True;a._ws=SimpleNamespace(closed=False);a._markdown_support=False
+        a._chat_type_map={'group':'group'};a.wire=[];a.failure=None
+        a._qq_reply_ledger=self.a._qq_reply_ledger
+        a._qq_group_results_store=self.a._qq_group_results_store
+        a.set_authorization_check(lambda *args:True)
+        called=[]
+        async def model(event):called.append(event);return 'should not invoke model'
+        a.set_message_handler(model)
+        event=MessageEvent(text='领取结果',source=SessionSource(platform=Platform.QQBOT,chat_id='group',chat_type='group',user_id='user'),message_id='msg',timestamp=datetime.now(timezone.utc))
+        a._start_session_processing(event,'lifecycle-test')
+        await a._session_tasks['lifecycle-test']
+        self.assertNotIn('lifecycle-test',a._active_sessions)
+        self.assertEqual(called,[])
+        def unavailable(*args):raise OSError('fixture database unavailable')
+        a._qq_group_results_store.pending=unavailable
+        a._start_session_processing(event,'lifecycle-io-error')
+        await a._session_tasks['lifecycle-io-error']
+        self.assertNotIn('lifecycle-io-error',a._active_sessions)
+        self.assertEqual(called,[])
+
+    async def test_existing_expired_anchor_fallback_is_not_reattached_by_budget(self):
+        from qq_budget_test.outbound import patch_expired_reply_fallback
+        class ExpiryAdapter(Adapter):
+            _send_group_text=QQAdapter._send_group_text
+            _send_c2c_text=QQAdapter._send_c2c_text
+        patch_expired_reply_fallback(ExpiryAdapter)
+        a=ExpiryAdapter(PlatformConfig(extra={'app_id':'fixture-bot','client_secret':'fixture-secret'}))
+        a.__dict__.update(self.a.__dict__);a.expired_anchor='msg'
+        self.assertTrue((await a.send('group','answer',reply_to='msg',metadata={'notify':True})).success)
+        self.assertEqual([b.get('msg_id') for _,b in a.wire],['msg',None])
 
 if __name__=='__main__':unittest.main()

@@ -112,6 +112,25 @@ reminders, bubble reuse, new post-reminder output and final file delivery. The
 attachment follow-up passed on both; 27 unique release regressions and four
 native Windows streaming/final/steering checks also passed.
 
+## System-R&D canary (1.8.45)
+
+The platform-operations bot was restored to its exact pre-budget 1.8.42 production
+backup at the operator's request. Further changes are tested on System R&D only.
+Version 1.8.45 preserves the existing one-shot standalone retry for an **explicitly
+expired** `msg_id`, including preventing the chunk wrapper from reattaching it.
+Local count exhaustion and the combined QQ time/count error still retain results
+and do not blind-retry the same passive anchor. Standalone delivery still requires
+QQ's existing permission; a rejection remains a failure/pending result.
+
+Result retrieval now returns its notice through the native Hermes handler and
+processing lifecycle, so it releases the session guard without invoking the model.
+The previous shortcut could leave a busy guard after `领取结果`; preparation I/O
+failures now also retain native cleanup. Verify `test_reply_budget.py`'s real
+Hermes lifecycle and expiry compatibility cases, then the existing stream/media
+regressions. Back up the plugin and restart only the idle System-R&D Gateway to
+enable. Roll back only plugin code, retaining quota/outbox state and all sessions.
+No 50-reply identity grant is enabled by this canary.
+
 ## Per-message reply budget (1.8.44)
 
 All authenticated QQ `msg_id` replies through the adapter now share one persistent
@@ -143,7 +162,7 @@ This compensates for upstream Hermes' separate text/media sequence generation,
 clearing `reply_to` after a first chunk, and independent retry loops. Earlier
 expiry detection did not recognize `40034128` / the combined Chinese time/count
 error, and the Windows-only result outbox did not cover ordinary group output.
-No reply ID is fabricated, no expired ID is reused, and quota rejection does not
+No reply ID is fabricated, no expired ID is reused, and count-budget rejection does not
 trigger an unanchored proactive send. API/model/approval permissions are unchanged.
 
 Group text and attachments are persisted before delivery in
