@@ -112,10 +112,82 @@ reminders, bubble reuse, new post-reminder output and final file delivery. The
 attachment follow-up passed on both; 27 unique release regressions and four
 native Windows streaming/final/steering checks also passed.
 
+## Proactive-first group delivery (1.8.46)
+
+Group text, keyboards, progress/Working messages and native attachments now
+prefer QQ's proactive send path: the shared `/v2/groups/{id}/messages` request
+omits `msg_id`, `event_id` and the old reply reference. Hermes normally carries
+the initiating message into final delivery, and the result-store wrapper also
+reattached it to progress sends; that consumed the passive allowance even when
+the group had explicitly enabled proactive messages. The new transport sits
+above the existing reply ledger so proactive sends do not spend or reset an
+inbound message's passive count. Native C2C streaming and explicit `event_id`
+interaction replies keep their existing contracts.
+
+The transport reads `GET /v2/groups/{id}/bot_state` and caches the boolean
+`allow_proactive_msg` for 60 seconds. With permission enabled it sends proactively;
+when the read API is unavailable it lets the send API decide. A definite proactive
+permission rejection invalidates the cached grant and permits one passive attempt
+using an authenticated, correctly scoped inbound `msg_id`. Permission disabled
+skips the proactive attempt. Passive fallback has a **60-minute** window, with a
+five-second send margin, and retains the existing shared count/final-slot rules.
+No fallback uses a fabricated identifier, resets a count or loops back to proactive.
+
+Proactive sends are spaced by at least 3.1 seconds per group and 2.1 seconds per
+bot, conservatively fitting the documented 20/group/minute and lower 30/bot/minute
+tier. Reservations share `qq-reply-budget.sqlite3` across senders using the same
+profile and survive restart. Separate profiles sharing one AppID are not one
+shared rate domain; QQ remains authoritative for its daily quota, permission,
+content and frequency checks. Rate rejection does not switch to passive to escape
+the rate check. A timeout or missing message ID is unconfirmed and is not retried
+by the native chunk loop or converted to passive. Existing result-store claims
+retain uncertain final text/files without blind replay; definite rejections stay
+pending for a later authorized delivery.
+
+System R&D acceptance on 2026-11-26 passed: six texts, one file and one image
+were acknowledged and received with an authentic 76-minute-old, five-reply-used
+anchor; its passive count stayed at five. A separate real Gateway conversation
+completed with zero passive reservations. Seventeen proactive cases and sixteen
+regression scripts passed; disabled-permission and ambiguous-send cases were
+verified offline without changing real group permissions.
+
+The authorized platform-operations and product-R&D rollouts then passed their
+Mac/Windows checks, exact source-tree verification, QQ/API/A2A readiness and real
+Gateway inference after idle-only restarts. Configuration, service definitions,
+credentials, passive counts and retained result rows were preserved. These
+checks did not send new test traffic into either business group.
+
+After the operator authorizes a department rollout, install this plugin tree
+and restart only that department's idle Gateway; no new config switch is needed.
+Before switching, verify matching live PID, no active agents/turns, no API runs
+or pending background work, and recheck immediately before stopping the owner.
+Back up the exact plugin, reply ledger and retained results first. After restart,
+verify the full source digest, fresh startup log, QQ/API readiness and a real
+Gateway inference probe; health alone does not prove client message delivery.
+In the latest mobile QQ client,
+the **group owner** must separately enable the bot's proactive group-message
+setting. Developer/group-admin status and receiving all group messages are not
+substitutes. Installing the plugin does not enable that group setting automatically.
+
+Verify `test_group_delivery.py` with the real upstream adapter and fake HTTP,
+then the existing reply-budget, expiry, media, startup and C2C regressions.
+System R&D acceptance must cover more than five text/attachment sends, an old
+passive anchor, a disabled-permission group, and failure retention; distinguish
+API acknowledgments from QQ client receipt. Roll back the plugin tree to its
+pre-install backup and restart only the same idle Gateway. Keep both SQLite
+stores and copied result files; the added pacing table is harmless to older
+versions. No Hermes upstream source or credentials are changed.
+
+Official contracts: [group message send](https://bot.q.qq.com/wiki/develop/api-v2/autogen/api/v2_groups_group_openid_messages.post.html),
+[group bot state](https://bot.q.qq.com/wiki/develop/api-v2/autogen/api/v2_groups_group_openid_bot_state.get.html),
+[group-owner proactive setting](https://bot.q.qq.com/wiki/bot_FAQ/), and the
+[2026-11-17 60-minute update](https://bot.q.qq.com/wiki/develop/api-v2/changelog.html).
+
 ## System-R&D canary (1.8.45)
 
-The platform-operations bot was restored to its exact pre-budget 1.8.42 production
-backup at the operator's request. Further changes are tested on System R&D only.
+The platform-operations bot was initially restored to its exact pre-budget 1.8.42
+production backup at the operator's request. Validation at this stage was limited
+to System R&D before the later authorized 1.8.46 rollout described above.
 Version 1.8.45 preserves the existing one-shot standalone retry for an **explicitly
 expired** `msg_id`, including preventing the chunk wrapper from reattaching it.
 Local count exhaustion and the combined QQ time/count error still retain results

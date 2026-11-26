@@ -277,7 +277,8 @@ print('no-agent route probe; manual QQ send blocked')
             async def wrong_route(self, target, text, metadata):
                 return await route(self, replace(target, chat_id='home-user'), text, metadata)
             with patch.object(DeliveryRouter, '_deliver_to_platform', wrong_route):
-                assert 'destination mismatch' in await send()
+                error = await send()
+                assert any(reason in error for reason in ('destination mismatch', 'refusing a different destination')), error
             assert adapter.calls == []
 
             # Do not count Hermes' generated fallback UUID as a QQ receipt.

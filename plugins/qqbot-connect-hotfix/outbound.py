@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 _EXPIRED_REPLY_WRAPPER = "_qqbot_expired_reply_fallback_wrapped"
 _EXPIRED_REPLY_STANDALONE = contextvars.ContextVar("qq_expired_reply_standalone", default="")
 _POST_STREAM_DELIVERY = contextvars.ContextVar("qq_post_stream_delivery", default=None)
-_GROUP_REPLY_MAX_AGE = 3595  # QQ's current 60-minute group window, with a send margin.
+_GROUP_REPLY_MAX_AGE = 60 * 60 - 5
 
 
 def _forget_expired_group_anchor(adapter: Any, chat_id: str, anchor: object) -> None:
@@ -75,6 +75,8 @@ def is_expired_reply_error(error: object) -> bool:
     """
 
     text = str(error or "").lower()
+    if 'qq_group_delivery_forbidden' in text:
+        return False
     has_reply_id = any(
         marker in text for marker in ("msg_id", "msgid", "message_id", "message id")
     )
@@ -283,6 +285,8 @@ def should_retry_group_as_passive_reply(self, exc: Exception, group_openid: str,
     if reply_to or _EXPIRED_REPLY_STANDALONE.get() == group_openid:
         return False
     text = str(exc).lower()
+    if 'qq_group_delivery_forbidden' in text:
+        return False
     denied = "主动消息失败" in text or "proactive message" in text or "无权限" in text
     return denied and bool(_recent_group_reply_anchor(self, group_openid))
 

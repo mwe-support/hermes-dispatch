@@ -1,8 +1,8 @@
 """Durable, acknowledgement-based delivery of QQ group task results.
 
-QQ replies have a short lifetime. Never fall back to an unauthorized proactive
-send after a long task; retain final items and use the next authenticated group
-mention as a fresh reply anchor. Ambiguous sends are retained for manual review.
+The group transport prefers proactive delivery, falling back to an authenticated
+reply anchor when needed. Rejected results are retained; ambiguous sends are
+kept for manual review.
 """
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ import shutil
 import sqlite3
 import time
 
-from .reply_budget import PRIORITY, REQUEST, is_budget_error
+from .reply_budget import PRIORITY, REQUEST, WINDOW as REPLY_WINDOW, is_budget_error
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -26,7 +26,7 @@ _TURN = contextvars.ContextVar("qq_group_result_turn", default=None)
 _REPLAY = contextvars.ContextVar("qq_group_result_replay", default=False)
 _MARKER = "_qq_group_results_wrapped"
 _COMMANDS = {"领取结果", "取结果", "补发结果", "/results"}
-WINDOW = 3595  # Current group window is 60 minutes; retain a send margin.
+WINDOW = REPLY_WINDOW - 5
 
 
 def _result(success=False, error=None, message_id=None):
@@ -38,7 +38,7 @@ def _denied(error):
     text = str(error or "").lower()
     if "unconfirmed" in text:
         return False
-    return is_budget_error(error) or any(x in text for x in ("主动消息失败", "无权限", "msg_id已过期", "msgid已经过期", "reply_window_closed")) or (
+    return 'qq_group_delivery_forbidden: rejected' in text or is_budget_error(error) or any(x in text for x in ("主动消息失败", "无权限", "msg_id已过期", "msgid已经过期", "reply_window_closed")) or (
         ("msg_id" in text or "msgid" in text) and ("过期" in text or "expired" in text)
     )
 
@@ -145,7 +145,7 @@ async def _deliver(adapter, row, anchor, priority="final"):
     store = _store(adapter)
     if row["status"] == "delivered":
         return _result(True, message_id=row["ack"])
-    if not anchor:
+    if not anchor and not getattr(adapter._api_request, '_qq_group_delivery_wrapped', False):
         return _result(error="qq_group_result_pending: waiting for a fresh group mention")
     if not await asyncio.to_thread(store.claim, row["id"]):
         current = await asyncio.to_thread(store.get, row["id"])
@@ -273,7 +273,8 @@ def patch_group_results(QQAdapter):
         if not _scope(self, chat_id, metadata, reply_to):
             # Avoid repeated unauthorized Working/commentary sends after expiry.
             turn = _TURN.get()
-            if not _REPLAY.get() and turn and turn["chat"] == chat_id and not _anchor(self, chat_id):
+            if (not getattr(self._api_request, '_qq_group_delivery_wrapped', False)
+                    and not _REPLAY.get() and turn and turn["chat"] == chat_id and not _anchor(self, chat_id)):
                 return _result(error="qq_group_reply_window_closed")
             meta = metadata or {}
             priority = PRIORITY.set('final' if meta.get('notify') else 'progress' if meta.get('_interim_send') else PRIORITY.get())

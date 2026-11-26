@@ -48,6 +48,8 @@ class Ledger:
                     bot TEXT, msg TEXT, key TEXT, seq INTEGER, priority TEXT,
                     status TEXT, response TEXT, stream TEXT,
                     PRIMARY KEY(bot,msg,key));
+                CREATE TABLE IF NOT EXISTS group_send_pacing (
+                    bot TEXT, chat TEXT, ready REAL, PRIMARY KEY(bot,chat));
             ''')
         self.path.chmod(0o600)
 
@@ -113,6 +115,26 @@ class Ledger:
                            ('sent' if response is not None else 'uncertain',
                             json.dumps(response) if response is not None else None,
                             str(response.get('id') or '') if response else None, bot, msg, key))
+
+    def group_anchor(self, bot, msg, chat):
+        with self.connect() as db:
+            row = db.execute('SELECT * FROM anchors WHERE bot=? AND msg=?', (bot, msg)).fetchone()
+        if not row or row['scene'] != 'group' or row['chat'] != chat:
+            raise BudgetDenied('qq_reply_budget_forbidden: unknown or mismatched inbound message')
+        return time.time() < row['expires'] - 5
+
+    def group_send_delay(self, bot, chat):
+        # Shared by Gateway and other adapters using this profile; use the lower 30/min bot tier.
+        with self.connect() as db:
+            db.execute('BEGIN IMMEDIATE')
+            now = time.time()
+            ready = db.execute('SELECT max(ready) FROM group_send_pacing WHERE bot=? AND chat IN (?,?)',
+                               (bot, '', chat)).fetchone()[0] or 0
+            if ready > now:
+                return ready - now
+            for scope, interval in (('', 2.1), (chat, 3.1)):
+                db.execute('INSERT OR REPLACE INTO group_send_pacing VALUES(?,?,?)', (bot, scope, now + interval))
+        return 0
 
 
 def ledger(adapter):

@@ -117,6 +117,8 @@ def _patch_gateway_methods(QQAdapter):
     patch_global_model_scope(GatewayRunner)
     from .reply_budget import patch_reply_budget
     patch_reply_budget(QQAdapter)
+    from .group_delivery import patch_group_delivery
+    patch_group_delivery(QQAdapter)
     _patch_post_stream_media_failures(QQAdapter)
     streaming_status = _patch_qq_c2c_streaming(QQAdapter)
     logger.info("qqbot-connect-hotfix: %s", streaming_status)

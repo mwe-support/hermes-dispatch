@@ -1,6 +1,6 @@
 name: qqbot-connect-hotfix
-version: 1.8.45
-description: "Local hotfix: modular QQBot compatibility patches for optional trusted-inviter whole-group authorization and native output attachments, connect signature, group interactions, complete Codex approval choices, owner-bound shared-group approvals, channel routing, snapshots/context, mention gating, native C2C streaming with consecutive commentary and trusted turn-final ownership, independent age expiry, ambiguous-response reconciliation, bounded frame cooldown/coalescing, terminal lifetime retirement, chat-scoped active/completed/cancelled ownership, bounded single-flight final delivery, claim-scoped abandon completion, coordinated abandonment, stable-anchor replay and lifecycle registries, bounded typing, expired reply msg_id fallback, markdown, and media compatibility. Remove after Hermes upgrade."
+version: 1.8.46
+description: "Local hotfix: proactive-first QQ group delivery with 60-minute passive fallback, shared reply budgets and durable result retention; modular compatibility for optional trusted-inviter whole-group authorization, native attachments, approvals, channel routing, snapshots/context, mention gating, native C2C streaming, bounded typing, markdown and media. Remove after Hermes upgrade."
 author: local
 kind: standalone
 requires_plugins:
