@@ -115,9 +115,13 @@ def _patch_gateway_methods(QQAdapter):
     patch_gateway_scope(GatewayRunner)
     from .model_scope import patch_global_model_scope
     patch_global_model_scope(GatewayRunner)
+    from .reply_budget import patch_reply_budget
+    patch_reply_budget(QQAdapter)
     _patch_post_stream_media_failures(QQAdapter)
     streaming_status = _patch_qq_c2c_streaming(QQAdapter)
     logger.info("qqbot-connect-hotfix: %s", streaming_status)
+    from .group_results import patch_group_results
+    patch_group_results(QQAdapter)
     choices_status = _patch_codex_approval_choices(QQAdapter)
     logger.info("qqbot-connect-hotfix: %s", choices_status)
     approval_status = _patch_shared_group_approval_owners(QQAdapter)

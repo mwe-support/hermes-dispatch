@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 _EXPIRED_REPLY_WRAPPER = "_qqbot_expired_reply_fallback_wrapped"
 _EXPIRED_REPLY_STANDALONE = contextvars.ContextVar("qq_expired_reply_standalone", default="")
 _POST_STREAM_DELIVERY = contextvars.ContextVar("qq_post_stream_delivery", default=None)
-_GROUP_REPLY_MAX_AGE = 295  # QQ's five-minute window, with a small send margin.
+_GROUP_REPLY_MAX_AGE = 3595  # QQ's current 60-minute group window, with a send margin.
 
 
 def _forget_expired_group_anchor(adapter: Any, chat_id: str, anchor: object) -> None:
