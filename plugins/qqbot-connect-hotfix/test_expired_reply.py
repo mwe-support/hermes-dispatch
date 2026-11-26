@@ -227,7 +227,7 @@ async def main():
     assert recent.calls == [("progress", None, keyboard), ("progress", "recent", keyboard)]
 
     stale = ComposedGroupAdapter()
-    await inbound(stale, "recent", age=301)
+    await inbound(stale, "recent", age=3601)
     try:
         await stale._send_group_text("group", "final")
     except RuntimeError as exc:

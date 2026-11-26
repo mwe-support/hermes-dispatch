@@ -1408,13 +1408,9 @@ def _is_terminal_stream_lifetime_error(exc: Exception) -> bool:
 
 
 def _is_terminal_passive_reply_budget_error(exc: Exception) -> bool:
-    """Recognize QQ's terminal response-window or reply-budget rejection."""
-
-    message = str(exc)
-    return (
-        "回复消息失败，被动回复时间或者次数超过限制" in message
-        or "40034128" in message
-    )
+    """Recognize server rejections and the shared local per-message guard."""
+    from .reply_budget import is_budget_error
+    return is_budget_error(exc)
 
 
 def _is_stale_stream_index_error(exc: Exception) -> bool:
